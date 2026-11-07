@@ -1,0 +1,28 @@
+# ===== Imou Open Platform =====
+IMOU_APP_ID=your_app_id
+IMOU_APP_SECRET=your_app_secret
+# Дата-центр смотрите в консоли Imou: Basic Information -> My Information.
+# Примеры: https://openapi-sg.easy4ip.com, https://openapi-fk.easy4ip.com, https://openapi-or.easy4ip.com
+IMOU_API_HOST=https://openapi-sg.easy4ip.com
+
+# ===== Домен для HTTPS (нужен для вебхука Imou) =====
+# Если домена нет, подойдёт бесплатный sslip.io: для IP 1.2.3.4 -> 1-2-3-4.sslip.io
+DOMAIN=1-2-3-4.sslip.io
+
+# Секретная часть адреса вебхука (любая длинная случайная строка)
+WEBHOOK_SECRET=change-me-to-random-string
+
+# ===== Админка =====
+ADMIN_USER=admin
+ADMIN_PASSWORD=change-me
+
+# ===== Прочее =====
+TZ=Asia/Almaty
+# Сколько потоков CPU отдавать нейросетям (1-2 для слабого VPS)
+ANPR_THREADS=2
+# Модель детектора: yolo-v9-t-256/384/512/640-license-plate-end2end
+# 384 — хороший баланс. 256 — быстрее, но хуже на дальних номерах.
+DETECTOR_MODEL=yolo-v9-t-384-license-plate-end2end
+OCR_MODEL=cct-xs-v2-global-model
+# Сколько дней хранить снимки событий
+KEEP_DAYS=14

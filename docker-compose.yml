@@ -1,0 +1,48 @@
+services:
+  app:
+    build: .
+    image: plate-gate:latest
+    container_name: plate-gate
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      TZ: ${TZ:-Asia/Almaty}
+    volumes:
+      - ./data:/data
+    # Ограничения под слабый VPS. Распознаванию хватает 1 ядра и ~400 МБ.
+    cpus: ${APP_CPUS:-2}
+    mem_limit: ${APP_MEM:-1g}
+    # Порт только для локального доступа (ssh -L 8000:127.0.0.1:8000 ...).
+    ports:
+      - "127.0.0.1:8000:8000"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request;urllib.request.urlopen('http://127.0.0.1:8000/health')"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+
+  # HTTPS-прокси с автоматическим сертификатом Let's Encrypt.
+  # Imou принимает только https-адрес вебхука.
+  caddy:
+    image: caddy:2-alpine
+    container_name: plate-gate-caddy
+    restart: unless-stopped
+    depends_on: [app]
+    ports:
+      - "80:80"
+      - "443:443"
+    environment:
+      DOMAIN: ${DOMAIN:-}
+      PUBLIC_IP: ${PUBLIC_IP:-}
+    # Если DOMAIN не задан — берём публичный IP сервера и используем бесплатный
+    # домен <ip-через-дефисы>.sslip.io (резолвится в этот IP), Let's Encrypt выдаёт на него сертификат.
+    entrypoint: ["/bin/sh", "/etc/caddy/entrypoint.sh"]
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - ./caddy-entrypoint.sh:/etc/caddy/entrypoint.sh:ro
+      - caddy_data:/data
+      - caddy_config:/config
+
+volumes:
+  caddy_data:
+  caddy_config:

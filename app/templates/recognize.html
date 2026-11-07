@@ -1,0 +1,9 @@
+{% extends "base.html" %}{% block body %}
+<div class="card"><h2>Результат ({{'%.0f'|format(elapsed*1000)}} мс)</h2>
+<table><tr><th>Номер</th><th>Уверенность</th><th>Формат РК</th><th>В белом списке</th></tr>
+{% for r in results %}<tr><td class="plate">{{r.plate}}</td><td>{{'%.1f%%'|format(r.conf*100)}}</td>
+<td>{{'да' if r.kz else 'нет'}}</td><td>{% if r.wl %}<span class="ok">да</span>{% else %}<span class="no">нет</span>{% endif %}</td></tr>
+{% else %}<tr><td colspan="4" class="mut">Номер не найден</td></tr>{% endfor %}</table>
+<p><img src="data:image/jpeg;base64,{{image}}" style="max-width:100%;border-radius:8px"></p>
+<a href="/">← назад</a></div>
+{% endblock %}

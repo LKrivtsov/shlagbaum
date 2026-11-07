@@ -1,0 +1,14 @@
+{% extends "base.html" %}{% block body %}
+<div class="card"><h2>Добавить номера</h2>
+<form method="post" action="/whitelist/add">
+<label>Номера — по одному в строке, после номера через пробел можно указать владельца (кириллица тоже понимается)</label>
+<textarea name="plates" rows="4" placeholder="901CX01 Иванов кв. 12&#10;724AJW02 Петров"></textarea>
+<p><button>Добавить</button></p></form></div>
+<div class="card"><h2>Белый список ({{items|length}})</h2>
+<table><tr><th>Номер</th><th>Владелец</th><th>Статус</th><th></th></tr>
+{% for w in items %}<tr><td class="plate">{{w.plate}}</td><td>{{w.owner}}</td>
+<td>{% if w.active %}<span class="ok">активен</span>{% else %}<span class="mut">выключен</span>{% endif %}</td>
+<td><form class="inline" method="post" action="/whitelist/{{w.id}}/toggle"><button class="sm sec">{{'выключить' if w.active else 'включить'}}</button></form>
+<form class="inline" method="post" action="/whitelist/{{w.id}}/delete" onsubmit="return confirm('Удалить {{w.plate}}?')"><button class="sm red">удалить</button></form></td></tr>
+{% else %}<tr><td colspan="4" class="mut">Список пуст</td></tr>{% endfor %}</table></div>
+{% endblock %}

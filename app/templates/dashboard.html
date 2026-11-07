@@ -1,0 +1,17 @@
+{% extends "base.html" %}{% block body %}
+<div class="card"><h2>Проверить распознавание на фото</h2>
+<form method="post" action="/test/recognize" enctype="multipart/form-data">
+<input type="file" name="file" accept="image/*" required> <button>Распознать</button></form></div>
+<div class="card"><h2>Последние события</h2>
+<table><tr><th>Время</th><th>Снимок</th><th>Номер</th><th>Уверенн.</th><th>Доступ</th><th>Действие</th><th>Камера / событие</th></tr>
+{% for e in events %}{% set d = e.details|fromjson %}
+<tr><td>{{e.ts|dt}}</td>
+<td>{% if e.image %}<a href="/snap/{{e.image}}" target="_blank"><img class="th" src="/snap/{{e.image}}"></a>{% endif %}</td>
+<td class="plate">{{e.plate or '—'}}{% if d.owner %}<div class="mut">{{d.owner}}</div>{% endif %}</td>
+<td>{{ '%.0f%%'|format(e.confidence*100) if e.confidence else '' }}</td>
+<td>{% if e.allowed %}<span class="ok">разрешён</span>{% elif e.plate %}<span class="no">нет в списке</span>{% endif %}</td>
+<td>{{e.action}}<div class="mut">{{d.info}} {% if d.elapsed %}· {{d.elapsed}} с{% endif %}</div></td>
+<td class="mut">{{e.device_id}}/{{e.channel_id}}<br>{{e.msg_type}}</td></tr>
+{% else %}<tr><td colspan="7" class="mut">Событий пока нет</td></tr>{% endfor %}
+</table></div>
+{% endblock %}

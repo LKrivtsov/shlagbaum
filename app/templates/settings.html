@@ -1,0 +1,50 @@
+{% extends "base.html" %}{% block body %}
+{% macro chk(k, title) %}<label><input type="checkbox" name="{{k}}" value="1" {{'checked' if s[k]=='1'}}> {{title}}</label>{% endmacro %}
+<div class="card"><h2>Распознавание и доступ</h2>
+<form method="post" action="/settings"><input type="hidden" name="_section" value="rec">
+<label>Типы событий, запускающие распознавание (msgType через запятую, пусто = любые)</label>
+<input name="trigger_msg_types" value="{{s.trigger_msg_types}}" style="width:100%">
+<div class="grid">
+<div><label>Снимков на событие</label><input name="attempts" value="{{s.attempts}}"></div>
+<div><label>Пауза между снимками, с</label><input name="attempt_interval" value="{{s.attempt_interval}}"></div>
+<div><label>Мин. уверенность OCR (0–1)</label><input name="min_confidence" value="{{s.min_confidence}}"></div>
+<div><label>Допуск ошибок символов при сверке (0 = строго)</label><input name="fuzzy_match" value="{{s.fuzzy_match}}"></div>
+<div><label>Пауза повторного открытия, с</label><input name="cooldown_seconds" value="{{s.cooldown_seconds}}"></div>
+</div>
+{{chk('kz_format_only','Принимать только номера в формате РК')}}
+{{chk('gate_enabled','Открывать шлагбаум (общий выключатель)')}}
+<p><button>Сохранить</button></p></form></div>
+
+<div class="card"><h2>Telegram</h2>
+<form method="post" action="/settings"><input type="hidden" name="_section" value="tg">
+<div class="grid">
+<div><label>Токен бота (от @BotFather)</label><input name="tg_token" value="{{s.tg_token}}"></div>
+<div><label>Chat ID (через запятую)</label><input name="tg_chat_ids" value="{{s.tg_chat_ids}}" placeholder="123456789,-100..."></div>
+</div>
+{{chk('tg_notify_allowed','Уведомлять о въезде из белого списка')}}
+{{chk('tg_notify_denied','Уведомлять о номерах не из списка')}}
+{{chk('tg_notify_unrecognized','Уведомлять, если номер не распознан')}}
+{{chk('tg_send_photo','Прикладывать снимок')}}
+<p><button>Сохранить</button></p></form>
+<form method="post" action="/settings/test-telegram"><button class="sec">Отправить тестовое сообщение</button></form>
+<p class="mut">Chat ID можно узнать у бота @userinfobot. Для группы добавьте бота в группу и используйте ID группы (начинается с -100).</p></div>
+
+<div class="card"><h2>SIP (звонок на шлагбаум)</h2>
+<form method="post" action="/settings"><input type="hidden" name="_section" value="sip">
+<div class="grid">
+<div><label>SIP-сервер (хост/IP)</label><input name="sip_server" value="{{s.sip_server}}" placeholder="sip.zadarma.com"></div>
+<div><label>Порт (UDP)</label><input name="sip_port" value="{{s.sip_port}}"></div>
+<div><label>Логин (SIP user)</label><input name="sip_user" value="{{s.sip_user}}"></div>
+<div><label>Логин авторизации (если отличается)</label><input name="sip_auth_user" value="{{s.sip_auth_user}}"></div>
+<div><label>Пароль</label><input name="sip_password" type="password" value="{{'********' if s.sip_password}}"></div>
+<div><label>Домен (если отличается от сервера)</label><input name="sip_domain" value="{{s.sip_domain}}"></div>
+<div><label>Номер шлагбаума</label><input name="sip_target" value="{{s.sip_target}}" placeholder="77011234567 или 101"></div>
+<div><label>Публичный IP VPS (обычно пусто)</label><input name="sip_local_ip" value="{{s.sip_local_ip}}"></div>
+<div><label>Ждать ответа, с</label><input name="sip_ring_timeout" value="{{s.sip_ring_timeout}}"></div>
+<div><label>Держать вызов после ответа, с</label><input name="sip_hold_seconds" value="{{s.sip_hold_seconds}}"></div>
+<div><label>DTMF после ответа (пусто = нет)</label><input name="sip_dtmf" value="{{s.sip_dtmf}}" placeholder="например 1#"></div>
+</div>
+<p><button>Сохранить</button></p></form>
+<form method="post" action="/settings/test-sip" onsubmit="return confirm('Позвонить на шлагбаум сейчас?')"><button class="sec">Тестовый звонок</button></form>
+<p class="mut">GSM-модуль шлагбаума обычно открывает по входящему звонку с разрешённого номера и сбрасывает вызов — это считается успехом (ответы 486/603). Номер SIP-линии, с которой звонит система, должен быть в списке разрешённых у самого шлагбаума.</p></div>
+{% endblock %}
