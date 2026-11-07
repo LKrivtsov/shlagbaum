@@ -1,4 +1,13 @@
+# Основной адрес: свой домен или <ip>.sslip.io с сертификатом Let's Encrypt
 {$DOMAIN} {
 	encode gzip
 	reverse_proxy app:8000
+}
+
+# Заход по голому IP (http:// или https://) — перенаправляем на основной адрес.
+# Для https://IP сертификат самоподписанный (браузер предупредит), после перехода
+# всё будет по нормальному сертификату.
+http://{$PUBLIC_IP}, https://{$PUBLIC_IP} {
+	tls internal
+	redir https://{$DOMAIN}{uri} permanent
 }
