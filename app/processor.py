@@ -22,7 +22,8 @@ log = logging.getLogger("processor")
 _busy: set[str] = set()          # камеры, которые сейчас обрабатываются
 _seen_ids: dict[str, float] = {}  # дедупликация сообщений Imou по id
 
-SOURCE_NAMES = {"snapshot": "снимок", "hls": "видеопоток HD", "event": "фото события", "rtsp": "RTSP"}
+SOURCE_NAMES = {"snapshot": "снимок", "hls": "видеопоток HD", "event": "фото события", "rtsp": "RTSP",
+                "smart": "снимок"}
 
 
 # ---------------------------------------------------------------- разбор push
@@ -41,6 +42,27 @@ def _find_key(o, key):
             if r is not None:
                 return r
     return None
+
+
+def event_time(msg: dict) -> float:
+    """Момент срабатывания (unix-время). utcTime бывает в секундах или миллисекундах;
+    time — unix или строка yyyyMMddHHmmss в местном времени камеры."""
+    for key in ("utcTime", "time"):
+        v = msg.get(key)
+        if v in (None, ""):
+            continue
+        try:
+            sv = str(v)
+            if sv.isdigit() and len(sv) == 14:
+                return datetime.strptime(sv, "%Y%m%d%H%M%S").replace(tzinfo=config.TZ).timestamp()
+            f = float(sv)
+            if f > 1e12:
+                f /= 1000
+            if 1.5e9 < f < 4e9:
+                return f
+        except Exception:
+            continue
+    return time.time()
 
 
 def parse_message(msg: dict) -> dict:
@@ -70,6 +92,7 @@ def parse_message(msg: dict) -> dict:
     # миниатюры — в конец списка
     pics.sort(key=lambda u: ("thumb" in u.lower() or "small" in u.lower()))
     return {"id": str(msg.get("id") or msg.get("alarmId") or ""), "msg_type": str(msg_type),
+            "ts": event_time(msg), "alarm_id": str(msg.get("alarmId") or msg.get("id") or ""),
             "label_type": _find_key(msg, "labelType") or "",
             "device_id": str(device), "channel_id": str(channel), "pictures": pics}
 
@@ -105,7 +128,8 @@ async def handle_push(msg: dict):
     if not cam or not cam["active"]:
         log.info("событие с неизвестной/выключенной камеры %s/%s", ev["device_id"], ev["channel_id"])
         return
-    await process_camera(cam, ev["msg_type"], ev["pictures"], label_type=ev["label_type"])
+    await process_camera(cam, ev["msg_type"], ev["pictures"], label_type=ev["label_type"], event_ts=ev["ts"],
+                         alarm_id=ev["alarm_id"])
 
 
 # ---------------------------------------------------------------- источники кадров
@@ -199,6 +223,93 @@ class FrameSource:
             self.stream.close()
 
 
+# ---------------------------------------------------------------- кадры на момент события
+def _local(ts: float) -> str:
+    return datetime.fromtimestamp(ts, config.TZ).strftime("%Y-%m-%d %H:%M:%S")
+
+
+async def alarm_pictures(cam, ts, alarm_id="", wait=8.0):
+    """Фото, которое камера сняла в момент тревоги (getAlarmMessage → picurlArray).
+    Фото появляется в облаке с небольшой задержкой — опрашиваем до wait секунд."""
+    end_wait = time.time() + wait
+    while True:
+        try:
+            alarms = await imou.alarm_messages(cam["device_id"], cam["channel_id"], _local(ts - 120), _local(ts + 60))
+        except Exception as e:
+            log.warning("getAlarmMessage: %s", e)
+            alarms = []
+
+        def dist(a):
+            if alarm_id and str(a.get("alarmId")) == alarm_id:
+                return -1
+            try:
+                return abs(float(a.get("time")) - ts)
+            except Exception:
+                return 1e9
+
+        alarms = sorted((a for a in alarms if a.get("picurlArray")), key=dist)
+        if alarms and dist(alarms[0]) <= 15:
+            urls = [u for u in alarms[0]["picurlArray"] if u and ".dav" not in u.lower()]
+            out = []
+            for u in urls[:3]:
+                try:
+                    img = anpr.decode_image(await imou.download(u))
+                    if img is not None:
+                        out.append(img)
+                except Exception as e:
+                    log.warning("фото тревоги не скачано: %s", e)
+            if out:
+                return out
+        if time.time() >= end_wait:
+            return []
+        await asyncio.sleep(1.5)
+
+
+def _read_record(url, duration, fps, max_frames=40, timeout=25):
+    """Читает HLS записи и берёт fps кадров в секунду записи. Возвращает [(секунда, кадр)]."""
+    cap = cv2.VideoCapture(url, cv2.CAP_FFMPEG)
+    out, t_end = [], time.time() + timeout
+    try:
+        if not cap.isOpened():
+            raise RuntimeError("не удалось открыть запись")
+        step, next_t, n = 1.0 / max(fps, 0.1), 0.0, 0
+        src_fps = cap.get(cv2.CAP_PROP_FPS) or 15
+        while time.time() < t_end and len(out) < max_frames:
+            if not cap.grab():
+                break
+            pos = cap.get(cv2.CAP_PROP_POS_MSEC) / 1000 or n / src_fps
+            n += 1
+            if pos > duration + 1:
+                break
+            if pos + 1e-3 >= next_t:
+                ok, fr = cap.retrieve()
+                if ok:
+                    out.append((pos, fr))
+                next_t += step
+    finally:
+        cap.release()
+    return out
+
+
+async def record_frames(cam, ts, before, after, fps):
+    """Кадры из записи SD-карты за отрезок [ts-before, ts+after]."""
+    ready = ts + after + 2 - time.time()   # запись должна успеть дописаться
+    if ready > 0:
+        await asyncio.sleep(ready)
+    last = None
+    for attempt in range(3):
+        try:
+            url = await imou.record_hls(cam["device_id"], cam["channel_id"], _local(ts - before), _local(ts + after))
+            frames = await asyncio.to_thread(_read_record, url, before + after, fps)
+            if frames:
+                return frames
+            last = "в записи нет кадров"
+        except Exception as e:
+            last = str(e)
+        await asyncio.sleep(2 + attempt * 2)
+    raise RuntimeError(f"запись SD: {last}")
+
+
 # ---------------------------------------------------------------- утилиты
 def match_whitelist(plate: str, settings: dict):
     tol = int(settings.get("fuzzy_match") or 0)
@@ -257,20 +368,20 @@ async def _open_gate(s):
 
 # ---------------------------------------------------------------- основной процесс
 async def process_camera(cam: dict, msg_type: str = "manual", pictures: list | None = None,
-                         force_open=True, label_type=""):
+                         force_open=True, label_type="", event_ts=None, alarm_id=""):
     key = f"{cam['device_id']}/{cam['channel_id']}"
     if key in _busy:
         return {"skipped": "уже обрабатывается"}
     _busy.add(key)
     try:
         if cam.get("role") == "exit":
-            return await _process_exit(cam, msg_type, pictures or [], force_open, label_type)
-        return await _process_entry(cam, msg_type, pictures or [], force_open, label_type)
+            return await _process_exit(cam, msg_type, pictures or [], force_open, label_type, event_ts, alarm_id)
+        return await _process_entry(cam, msg_type, pictures or [], force_open, label_type, event_ts, alarm_id)
     finally:
         _busy.discard(key)
 
 
-async def _process_exit(cam, msg_type, pictures, do_actions, label_type):
+async def _process_exit(cam, msg_type, pictures, do_actions, label_type, event_ts=None, alarm_id=""):
     """Выезд: открываем сразу по событию, параллельно делаем один кадр для журнала."""
     s = db.get_settings()
     t0 = time.time()
@@ -284,9 +395,16 @@ async def _process_exit(cam, msg_type, pictures, do_actions, label_type):
             gate_task = asyncio.create_task(_open_gate(s))
 
     frames, jpg = [], None
-    src = FrameSource(cam, pictures, s)
+    src = FrameSource(cam, pictures, dict(s, image_source="snapshot" if s.get("image_source") == "smart"
+                                         else s.get("image_source")))
     try:
-        img, mode = await src.get()
+        img, mode = None, "snapshot"
+        if event_ts and s.get("image_source") == "smart":
+            pics = await alarm_pictures(cam, event_ts, alarm_id, float(s.get("alarm_wait") or 8))
+            if pics:
+                img, mode = pics[0], "фото тревоги"
+        if img is None:
+            img, mode = await src.get()
         if img is not None:
             h, w = img.shape[:2]
             note = f"{SOURCE_NAMES.get(mode, mode)} {w}x{h}"
@@ -316,7 +434,7 @@ async def _process_exit(cam, msg_type, pictures, do_actions, label_type):
             "action": action, "details": details}
 
 
-async def _process_entry(cam, msg_type, pictures, do_actions, label_type):
+async def _process_entry(cam, msg_type, pictures, do_actions, label_type, event_ts=None, alarm_id=""):
     s = db.get_settings()
     attempts = max(1, int(s.get("attempts") or 3))
     interval = float(s.get("attempt_interval") or 1)
@@ -327,39 +445,102 @@ async def _process_entry(cam, msg_type, pictures, do_actions, label_type):
     best, errors, frames = None, [], []
     best_idx = None              # кадр с лучшим номером
     det_idx, det_score = None, 0.0  # кадр, где детектор видел номерную рамку (значит, есть машина)
-    src = FrameSource(cam, pictures, s)
-    try:
-        for i in range(attempts):
-            try:
-                img, mode = await src.get()
-                if img is None:
-                    raise RuntimeError("пустой кадр")
-                results, n_dets, max_det = await asyncio.to_thread(anpr.get().recognize, img, True)
-                h, w = img.shape[:2]
-                found = ", ".join(f"{r.plate} {r.confidence:.0%}" for r in results) or \
-                    ("номер виден, но не прочитан" if n_dets else "номер не найден")
-                note = f"{i + 1}/{attempts} · {SOURCE_NAMES.get(mode, mode)} {w}×{h} · {found}"
-                fname, _ = await asyncio.to_thread(_save_frame, img, results, cam, f"{i + 1}/{attempts} {w}x{h}")
-                frames.append({"file": fname, "note": note, "plates": [r.plate for r in results], "dets": n_dets})
-                idx = len(frames) - 1
-                if max_det > det_score:
-                    det_idx, det_score = idx, max_det
-                for r in results:
-                    if kz_only and not r.kz_valid:
-                        continue
-                    if best is None or r.score > best.score:
-                        best, best_idx = r, idx
-                if best and best.confidence >= min_conf and (best.kz_valid or not kz_only):
-                    if match_whitelist(best.plate, s) or best.confidence > 0.95:
+    ts = event_ts or time.time()
+    mode = s.get("image_source") or "smart"
+    done = False
+
+    def good_enough():
+        return bool(best and best.confidence >= min_conf and (best.kz_valid or not kz_only)
+                    and (match_whitelist(best.plate, s) or best.confidence > 0.95))
+
+    async def handle(img, label, keep_always=True):
+        nonlocal best, best_idx, det_idx, det_score
+        results, n_dets, max_det = await asyncio.to_thread(anpr.get().recognize, img, True)
+        h, w = img.shape[:2]
+        if not keep_always and not n_dets:
+            return  # кадры записи без номера не храним, чтобы не засорять событие
+        found = ", ".join(f"{r.plate} {r.confidence:.0%}" for r in results) or \
+            ("номер виден, но не прочитан" if n_dets else "номер не найден")
+        fname, _ = await asyncio.to_thread(_save_frame, img, results, cam, f"{label} {w}x{h}")
+        frames.append({"file": fname, "note": f"{label} · {w}×{h} · {found}",
+                       "plates": [r.plate for r in results], "dets": n_dets})
+        idx = len(frames) - 1
+        if max_det > det_score:
+            det_idx, det_score = idx, max_det
+        for r in results:
+            if kz_only and not r.kz_valid:
+                continue
+            if best is None or r.score > best.score:
+                best, best_idx = r, idx
+
+    # Параллельно сразу просим текущий снимок: если машина стоит у шлагбаума, он самый быстрый
+    snap_task = None
+    if mode == "smart" and event_ts and not cam.get("rtsp_url"):
+        snap_task = asyncio.create_task(imou.snapshot(cam["device_id"], cam["channel_id"]))
+
+    # 1. Фото тревоги — снято камерой в момент срабатывания
+    if mode == "smart" and event_ts:
+        try:
+            pics = await alarm_pictures(cam, ts, alarm_id, float(s.get("alarm_wait") or 8))
+            for k, img in enumerate(pics):
+                await handle(img, f"фото тревоги {k + 1}")
+            if not pics:
+                errors.append("фото тревоги не найдено")
+        except Exception as e:
+            errors.append(f"фото тревоги: {e}")
+        done = good_enough()
+
+    # 1б. Текущий снимок, запрошенный параллельно
+    if snap_task and done:
+        snap_task.cancel()   # номер уже прочитан с фото тревоги — не ждём
+    elif snap_task:
+        try:
+            data = await snap_task
+            if True:
+                img = anpr.decode_image(data)
+                if img is not None:
+                    await handle(img, "снимок сейчас")
+                    done = good_enough()
+        except Exception as e:
+            errors.append(f"снимок: {e}")
+
+    # 2. Кадры из записи SD-карты на время события
+    if mode == "smart" and event_ts and not done:
+        before, after = float(s.get("record_before") or 2), float(s.get("record_after") or 6)
+        try:
+            rec = await record_frames(cam, ts, before, after, float(s.get("record_fps") or 2))
+            kept_before = len(frames)
+            for pos, img in rec:
+                await handle(img, f"запись {pos - before:+.1f} с", keep_always=False)
+                if good_enough():
+                    break
+            if len(frames) == kept_before and rec:   # ни на одном кадре нет номера — сохраним первый для истории
+                await handle(rec[0][1], f"запись {rec[0][0] - before:+.1f} с")
+        except Exception as e:
+            errors.append(str(e))
+            log.warning("%s", e)
+        done = good_enough()
+
+    # 3. Текущие снимки (старый способ) — для ручной проверки и режимов без smart
+    if not done and not snap_task:
+        src = FrameSource(cam, pictures, dict(s, image_source="snapshot" if mode == "smart" else mode))
+        try:
+            n_live = attempts
+            for i in range(n_live):
+                try:
+                    img, m = await src.get()
+                    if img is None:
+                        raise RuntimeError("пустой кадр")
+                    await handle(img, f"{SOURCE_NAMES.get(m, m)} {i + 1}/{n_live}")
+                    if good_enough():
                         break
-            except Exception as e:
-                errors.append(f"кадр {i + 1}: {e}")
-                frames.append({"file": None, "note": f"{i + 1}/{attempts} · ошибка: {e}"})
-                log.warning("попытка %s: %s", i + 1, e)
-            if i < attempts - 1:
-                await asyncio.sleep(interval)
-    finally:
-        src.close()
+                except Exception as e:
+                    errors.append(f"снимок {i + 1}: {e}")
+                    frames.append({"file": None, "note": f"снимок {i + 1}/{n_live} · ошибка: {e}"})
+                if i < n_live - 1:
+                    await asyncio.sleep(interval)
+        finally:
+            src.close()
 
     # обложка события: кадр с номером -> кадр, где видна номерная рамка -> первый кадр
     # (событие приходит, когда машина уже в кадре, поэтому первый кадр надёжнее последнего)

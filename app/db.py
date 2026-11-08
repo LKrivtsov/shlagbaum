@@ -85,6 +85,11 @@ def init():
         if old and old["value"].startswith("aiVehDetect,aiVehLine,aiVehArea,detection.vehicle.detected"):
             # старый фильтр по msgType заменён фильтром labelType=carAlarm
             c.execute("UPDATE settings SET value='' WHERE key='trigger_msg_types'")
+        ver = c.execute("SELECT value FROM settings WHERE key='_schema'").fetchone()
+        if not ver or int(ver["value"]) < 2:
+            # v2: по умолчанию кадр берётся на момент события (фото тревоги / запись SD), а не «сейчас»
+            c.execute("UPDATE settings SET value='smart' WHERE key='image_source' AND value IN ('snapshot','event')")
+            c.execute("INSERT OR REPLACE INTO settings(key, value) VALUES ('_schema', '2')")
         for k, v in config.DEFAULT_SETTINGS.items():
             c.execute("INSERT OR IGNORE INTO settings(key, value) VALUES (?, ?)", (k, v))
 

@@ -142,6 +142,21 @@ class Imou:
         self._hls[key] = (url, time.time())
         return url
 
+    async def alarm_messages(self, device_id: str, channel_id: str, begin: str, end: str, count=20):
+        """Тревоги камеры за период (время — местное время камеры, "yyyy-MM-dd HH:mm:ss").
+        В каждой тревоге picurlArray — фото, снятое камерой в момент срабатывания."""
+        data = await self.call("getAlarmMessage", {
+            "deviceId": device_id, "channelId": str(channel_id), "beginTime": begin, "endTime": end,
+            "count": count, "nextAlarmId": "-1"})
+        return data.get("alarms") or []
+
+    async def record_hls(self, device_id: str, channel_id: str, begin: str, end: str, record_type="localRecord"):
+        """HLS-адрес воспроизведения записи (SD-карта или облако) за отрезок времени одного дня."""
+        data = await self.call("createDeviceRecordHls", {
+            "deviceId": device_id, "channelId": str(channel_id), "streamId": 0,
+            "beginTime": begin, "endTime": end, "recordType": record_type})
+        return data["url"]
+
     async def download(self, url: str) -> bytes:
         r = await self.client.get(url, follow_redirects=True)
         r.raise_for_status()

@@ -9,13 +9,20 @@
 {{chk('kz_format_only','Принимать только номера формата РК')}}
 <label>Источник кадра</label>
 <select name="image_source">
+<option value="smart" {{'selected' if s.image_source=='smart'}}>На момент события — фото тревоги и запись с SD-карты (рекомендуется)</option>
 <option value="snapshot" {{'selected' if s.image_source=='snapshot'}}>Снимок через облако — полное разрешение, 1–3 с</option>
 <option value="hls" {{'selected' if s.image_source=='hls'}}>HD-видеопоток — лучшее качество, задержка 2–5 с</option>
 <option value="event" {{'selected' if s.image_source=='event'}}>Фото из события — быстро, низкое качество</option>
 </select>
-<p class="hint">Если у камеры указан RTSP, он используется первым. При ошибке берётся снимок через облако.</p>
+<p class="hint">В режиме «На момент события» сначала берётся фото, которое камера сняла при срабатывании. Параллельно делается текущий снимок. Если номер не прочитан, распознаются кадры из записи на SD-карте за несколько секунд вокруг события.</p>
+<details style="margin-top:8px"><summary>Параметры записи</summary><div class="grid">
+<div><label>Ждать фото тревоги, с</label><input name="alarm_wait" value="{{s.alarm_wait}}" inputmode="decimal"></div>
+<div><label>Запись до события, с</label><input name="record_before" value="{{s.record_before}}" inputmode="decimal"></div>
+<div><label>Запись после события, с</label><input name="record_after" value="{{s.record_after}}" inputmode="decimal"></div>
+<div><label>Кадров в секунду записи</label><input name="record_fps" value="{{s.record_fps}}" inputmode="decimal"></div>
+</div></details>
 <div class="grid">
-<div><label>Кадров на событие</label><input name="attempts" value="{{s.attempts}}" inputmode="numeric"></div>
+<div><label>Снимков на событие (без режима «На момент события»)</label><input name="attempts" value="{{s.attempts}}" inputmode="numeric"></div>
 <div><label>Пауза между кадрами, с</label><input name="attempt_interval" value="{{s.attempt_interval}}" inputmode="decimal"></div>
 <div><label>Мин. уверенность (0–1)</label><input name="min_confidence" value="{{s.min_confidence}}" inputmode="decimal"></div>
 <div><label>Повторно не открывать, с</label><input name="cooldown_seconds" value="{{s.cooldown_seconds}}" inputmode="numeric"></div>
