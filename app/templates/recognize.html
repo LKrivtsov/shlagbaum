@@ -1,6 +1,7 @@
 {% extends "base.html" %}{% block body %}
-<p><a href="/">← к событиям</a></p>
-<div class="card"><h2>Результат · {{'%.0f'|format(elapsed*1000)}} мс</h2>
+<p><a href="/">События</a></p>
+<div class="pagehead"><h1>Распознавание</h1><p class="sub">{{'%.0f'|format(elapsed*1000)}} мс</p></div>
+<div class="card">
 <div class="list">
 {% for r in results %}<div class="item"><span class="plate">{{r.plate}}</span>
 <span class="mut">{{'%.1f%%'|format(r.conf*100)}}</span>

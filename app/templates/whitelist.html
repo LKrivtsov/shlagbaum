@@ -1,28 +1,29 @@
 {% extends "base.html" %}{% block title %}Белый список · Шлагбаум{% endblock %}
 {% block body %}
-<details class="card" {{'open' if not items}}><summary>➕ Добавить номера</summary>
-<form method="post" action="/whitelist/add" style="margin-top:10px">
+<div class="pagehead"><h1>Белый список</h1><p class="sub">Номера, для которых шлагбаум открывается автоматически.</p></div>
+<details class="card" {{'open' if not items}}><summary>Добавить номера</summary>
+<form method="post" action="/whitelist/add" style="margin-top:18px">
 <textarea name="plates" rows="4" placeholder="901 CX 01 Иванов кв. 12&#10;724AJW02 Петров" autocapitalize="characters"></textarea>
 <p class="hint">По одному номеру в строке. После номера через пробел можно указать владельца. Пробелы в номере и русские буквы допустимы.</p>
 <p><button class="full-m">Добавить</button></p></form></details>
 
 <div class="card">
-<div class="row" style="margin-bottom:6px"><h2 style="margin:0">Номера ({{items|length}})</h2><span class="sp"></span>
-<input id="flt" placeholder="Поиск" style="max-width:220px" autocapitalize="characters"></div>
+<div class="row" style="margin-bottom:6px"><h2 style="margin:0">Номера <span class="mut" style="font-weight:400;font-size:17px">{{items|length}}</span></h2><span class="sp"></span>
+<input id="flt" placeholder="Поиск" style="max-width:240px;border-radius:980px" autocapitalize="characters"></div>
 <div class="list" id="wl">
 {% for w in items %}
 <div class="item" data-s="{{w.plate}} {{w.owner|lower}}">
-  <span class="plate" style="{{'opacity:.45' if not w.active}}">{{w.plate}}</span>
+  <span class="plate" style="min-width:110px;{{'opacity:.35' if not w.active}}">{{w.plate}}</span>
   <form method="post" action="/whitelist/{{w.id}}/owner" class="row" style="flex:1;min-width:180px;flex-wrap:nowrap">
-    <input name="owner" value="{{w.owner}}" placeholder="владелец" style="padding:7px 10px">
-    <button class="sm sec" title="Сохранить">💾</button>
+    <input name="owner" value="{{w.owner}}" placeholder="Владелец" style="padding:8px 12px;font-size:15px;border-color:transparent;background:var(--bg)" onfocus="this.nextElementSibling.style.visibility='visible'">
+    <button class="sm" style="visibility:hidden">Сохранить</button>
   </form>
   <div class="row">
-    <form class="inline" method="post" action="/whitelist/{{w.id}}/toggle"><button class="sm sec">{{'⏸ выкл' if w.active else '▶️ вкл'}}</button></form>
-    <form class="inline" method="post" action="/whitelist/{{w.id}}/delete" onsubmit="return confirm('Удалить {{w.plate}}?')"><button class="sm red">🗑</button></form>
+    <form class="inline" method="post" action="/whitelist/{{w.id}}/toggle"><button class="link" style="font-size:15px">{{'Отключить' if w.active else 'Включить'}}</button></form>
+    <form class="inline" method="post" action="/whitelist/{{w.id}}/delete" onsubmit="return confirm('Удалить {{w.plate}}?')"><button class="red" style="font-size:15px">Удалить</button></form>
   </div>
 </div>
-{% else %}<div class="empty">Список пуст — добавьте номера выше</div>{% endfor %}
+{% else %}<div class="empty">Список пуст. Добавьте номера выше.</div>{% endfor %}
 </div></div>
 {% endblock %}
 {% block scripts %}<script>

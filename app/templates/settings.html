@@ -1,8 +1,9 @@
 {% extends "base.html" %}{% block title %}Настройки · Шлагбаум{% endblock %}
 {% block body %}
+<div class="pagehead"><h1>Настройки</h1><p class="sub">Распознавание, уведомления и связь со шлагбаумом.</p></div>
 {% macro chk(k, title) %}<label class="chk"><input type="checkbox" name="{{k}}" value="1" {{'checked' if s[k]=='1'}}> {{title}}</label>{% endmacro %}
 
-<div class="card"><h2>🚗 Распознавание и доступ</h2>
+<div class="card"><h2>Распознавание и доступ</h2>
 <form method="post" action="/settings"><input type="hidden" name="_section" value="rec">
 {{chk('gate_enabled','Автоматически открывать шлагбаум')}}
 {{chk('kz_format_only','Принимать только номера формата РК')}}
@@ -29,23 +30,24 @@
 <p class="hint">Что присылает камера, видно на вкладке <a href="/imou">Imou</a>.</p></details>
 <p><button class="full-m">Сохранить</button></p></form></div>
 
-<div class="card"><h2>💬 Telegram</h2>
+<div class="card"><h2>Telegram</h2>
 <form method="post" action="/settings"><input type="hidden" name="_section" value="tg">
 <div class="grid">
 <div><label>Токен бота (от @BotFather)</label><input name="tg_token" value="{{s.tg_token}}" autocomplete="off" autocapitalize="off"></div>
 <div><label>Chat ID (через запятую)</label><input name="tg_chat_ids" value="{{s.tg_chat_ids}}" placeholder="123456789, -100..."></div>
 </div>
 <p class="hint">Chat ID можно узнать у @userinfobot. Для группы добавьте в неё бота и укажите ID группы, он начинается с -100.</p>
+<label style="margin-top:22px">Уведомлять</label>
 {{chk('tg_notify_allowed','Въезд из белого списка')}}
 {{chk('tg_notify_denied','Номер не из списка')}}
 {{chk('tg_notify_unrecognized','Номер не распознан')}}
 {{chk('tg_notify_exit','Выезд')}}
 {{chk('tg_send_photo','Прикладывать фото')}}
-<div class="row"><button>Сохранить</button>
+<div class="row" style="margin-top:20px"><button>Сохранить</button>
 <button class="sec" formaction="/settings/test-telegram">Отправить тест</button></div>
 </form></div>
 
-<div class="card"><h2>📞 SIP — звонок на шлагбаум</h2>
+<div class="card"><h2>SIP — звонок на шлагбаум</h2>
 <form method="post" action="/settings"><input type="hidden" name="_section" value="sip">
 <div class="grid">
 <div><label>SIP-сервер</label><input name="sip_server" value="{{s.sip_server}}" placeholder="sip.zadarma.com" autocapitalize="off"></div>
@@ -63,7 +65,7 @@
 <div><label>DTMF после ответа</label><input name="sip_dtmf" value="{{s.sip_dtmf}}" placeholder="например 1#"></div>
 </div></details>
 <p class="hint">GSM-модуль шлагбаума обычно открывает по звонку с разрешённого номера и сбрасывает вызов. Ответ «занято/отклонён» считается успехом. Номер SIP-линии должен быть в списке разрешённых у самого шлагбаума.</p>
-<div class="row"><button>Сохранить</button>
+<div class="row" style="margin-top:20px"><button>Сохранить</button>
 <button class="sec" formaction="/settings/test-sip" onclick="return confirm('Позвонить на шлагбаум сейчас?')">Тестовый звонок</button></div>
 </form></div>
 {% endblock %}

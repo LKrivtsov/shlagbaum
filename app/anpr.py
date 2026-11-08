@@ -107,14 +107,14 @@ def annotate(img: np.ndarray, results: list[PlateResult]) -> np.ndarray:
     out = img.copy()
     for r in results:
         x1, y1, x2, y2 = r.box
-        color = (0, 200, 0) if r.kz_valid else (0, 165, 255)
+        color = (89, 199, 52) if r.kz_valid else (0, 149, 255)  # системные зелёный/оранжевый
         t = max(2, img.shape[1] // 400)
         cv2.rectangle(out, (x1, y1), (x2, y2), color, t)
         label = f"{r.plate} {r.confidence:.2f}"
         fs = max(0.6, img.shape[1] / 1200)
         (tw, th), _ = cv2.getTextSize(label, cv2.FONT_HERSHEY_SIMPLEX, fs, t)
         cv2.rectangle(out, (x1, max(0, y1 - th - 10)), (x1 + tw + 6, y1), color, -1)
-        cv2.putText(out, label, (x1 + 3, y1 - 5), cv2.FONT_HERSHEY_SIMPLEX, fs, (255, 255, 255), t)
+        cv2.putText(out, label, (x1 + 3, y1 - 5), cv2.FONT_HERSHEY_SIMPLEX, fs, (255, 255, 255), t, cv2.LINE_AA)
     return out
 
 

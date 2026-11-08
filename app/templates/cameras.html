@@ -1,28 +1,26 @@
 {% extends "base.html" %}{% block title %}Камеры · Шлагбаум{% endblock %}
 {% block head %}<style>
-.cams{display:grid;grid-template-columns:repeat(auto-fill,minmax(320px,1fr));gap:12px}
+.cams{display:grid;grid-template-columns:repeat(auto-fill,minmax(320px,1fr));gap:20px}
 @media (max-width:600px){.cams{grid-template-columns:1fr}}
 </style>{% endblock %}
 {% block body %}
-<div class="card"><p class="hint" style="margin:0">События обрабатываются только с камер из этого списка.<br>
-<b>Въезд</b>: снимки, распознавание номера, открытие только для белого списка.<br>
-<b>Выезд</b>: шлагбаум открывается сразу по событию, без распознавания.</p></div>
+<div class="pagehead"><h1>Камеры</h1><p class="sub">Въезд — распознаём номер и сверяем с белым списком. Выезд — открываем сразу по событию.</p></div>
 
 <div class="cams">
 {% for c in cameras %}
 <div class="card" style="margin:0;{{'opacity:.6' if not c.active}}">
   <div class="row" style="margin-bottom:4px">
     <h2 style="margin:0">{{c.name or c.device_id}}</h2>
-    <span class="pill {{'b' if c.role == 'exit' else 'g'}}">{{'⬅️ выезд' if c.role == 'exit' else '➡️ въезд'}}</span>
-    {% if not c.active %}<span class="pill n">выключена</span>{% endif %}
+    <span class="sp"></span>{% if c.active %}<span class="pill g">Активна</span>{% else %}<span class="pill">Выключена</span>{% endif %}
   </div>
+  <div style="font-size:15px;margin-top:2px">{{'Выезд' if c.role == 'exit' else 'Въезд'}}</div>
   <div class="mut">{{c.device_id}} · канал {{c.channel_id}} · {{'RTSP' if c.rtsp_url else 'снимки через облако'}}</div>
-  <div class="row" style="margin-top:10px">
-    <form class="inline" method="post" action="/cameras/{{c.id}}/test"><button class="sm">📸 {{'Снимок' if c.role == 'exit' else 'Проверить'}}</button></form>
-    <form class="inline" method="post" action="/cameras/{{c.id}}/test" onsubmit="return confirm('Выполнить как настоящее событие (с открытием шлагбаума)?')"><input type="hidden" name="open_gate" value="1"><button class="sm sec">▶️ Как событие</button></form>
-    <form class="inline" method="post" action="/cameras/{{c.id}}/toggle"><button class="sm sec">{{'⏸ Выкл' if c.active else '▶️ Вкл'}}</button></form>
+  <div class="row" style="margin-top:18px">
+    <form class="inline" method="post" action="/cameras/{{c.id}}/test"><button class="sm">{{'Снимок' if c.role == 'exit' else 'Проверить'}}</button></form>
+    <form class="inline" method="post" action="/cameras/{{c.id}}/test" onsubmit="return confirm('Выполнить как настоящее событие (с открытием шлагбаума)?')"><input type="hidden" name="open_gate" value="1"><button class="sm sec">Как событие</button></form>
+    <form class="inline" method="post" action="/cameras/{{c.id}}/toggle"><button class="sm sec">{{'Выключить' if c.active else 'Включить'}}</button></form>
   </div>
-  <details style="margin-top:10px"><summary>Изменить</summary>
+  <details style="margin-top:14px"><summary>Изменить</summary>
   <form method="post" action="/cameras/{{c.id}}/edit">
     <label>Название</label><input name="name" value="{{c.name}}">
     <label>Роль</label><select name="role">
@@ -33,11 +31,11 @@
     <button class="red sm" formaction="/cameras/{{c.id}}/delete" onclick="return confirm('Удалить камеру?')">Удалить</button></div>
   </form></details>
 </div>
-{% else %}<div class="card empty">Камер нет — импортируйте из Imou или добавьте вручную</div>{% endfor %}
+{% else %}<div class="card empty">Камер нет. Импортируйте их из Imou или добавьте вручную.</div>{% endfor %}
 </div>
 
-<div class="card" style="margin-top:12px">
-<form method="post" action="/cameras/import"><button class="full-m">⬇️ Импортировать камеры из аккаунта Imou</button></form>
+<div class="card" style="margin-top:20px">
+<form method="post" action="/cameras/import"><button class="full-m">Импортировать камеры из аккаунта Imou</button></form>
 <details style="margin-top:12px"><summary>Добавить вручную</summary>
 <form method="post" action="/cameras/add"><div class="grid">
 <div><label>Device ID (серийный номер)</label><input name="device_id" required autocapitalize="characters"></div>

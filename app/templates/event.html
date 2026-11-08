@@ -1,51 +1,64 @@
-{% extends "base.html" %}{% block title %}Событие #{{e.id}}{% endblock %}
+{% extends "base.html" %}{% block title %}Событие #{{e.id}} · Шлагбаум{% endblock %}
 {% block head %}<style>
-.frames{display:grid;grid-template-columns:repeat(auto-fill,minmax(300px,1fr));gap:12px}
-.fr{background:#fff;border-radius:var(--rad);overflow:hidden;box-shadow:0 1px 2px #0000000f}
-.fr.cover{outline:3px solid var(--g)}
+.back{font-size:15px;display:flex;width:max-content;align-items:center;gap:6px;margin-bottom:14px}
+.back:before{content:"";width:8px;height:8px;border-left:1.6px solid currentColor;border-bottom:1.6px solid currentColor;transform:rotate(45deg)}
+.title{font-size:48px;font-weight:600;letter-spacing:-.02em;line-height:1.05;margin:0}
+.title.plate{font-size:52px;letter-spacing:.02em}
+.meta{display:grid;grid-template-columns:repeat(auto-fill,minmax(180px,1fr));gap:1px;background:var(--line2);border-radius:var(--rad);overflow:hidden;margin:28px 0}
+.meta div{background:var(--card);padding:16px 20px}
+.meta span{display:block;color:var(--text2);font-size:13px}
+.meta b{font-weight:500;font-size:17px}
+.frames{display:grid;grid-template-columns:repeat(auto-fill,minmax(320px,1fr));gap:20px}
+.fr{background:var(--card);border-radius:var(--rad);overflow:hidden}
 .fr img{width:100%;display:block;cursor:zoom-in}
-.fr .cap{padding:8px 10px;font-size:13px}
-.lb{position:fixed;inset:0;background:#000e;display:none;align-items:center;justify-content:center;z-index:50}
+.fr .cap{padding:14px 18px;font-size:14px;color:var(--text2)}
+.fr.cover{box-shadow:0 0 0 2px var(--text)}
+.lb{position:fixed;inset:0;background:rgba(0,0,0,.92);display:none;align-items:center;justify-content:center;z-index:50;cursor:zoom-out}
 .lb img{max-width:100%;max-height:100%}
 .lb.on{display:flex}
-@media (max-width:600px){.frames{grid-template-columns:1fr}}
+@media (max-width:640px){.title{font-size:34px}.title.plate{font-size:38px}.frames{grid-template-columns:1fr;gap:12px}.meta{margin:20px 0}}
 </style>{% endblock %}
 {% block body %}{% set d = e.details|fromjson %}
-<p><a href="/">← к событиям</a></p>
-<div class="card">
-  <div class="row" style="margin-bottom:8px">
-    {% if d.role == 'exit' %}<span class="pill b">⬅️ Выезд</span>
-    {% elif e.msg_type == 'manual' %}<span class="pill b">🔓 Открыто вручную</span>
-    {% elif e.plate %}<span class="plate" style="font-size:22px">{{e.plate}}</span>
-    {% else %}<span class="pill n">номер не распознан</span>{% endif %}
-    {% if e.action in ('open', 'open-manual') %}<span class="pill g">шлагбаум открыт</span>
-    {% elif e.action == 'open-failed' %}<span class="pill r">ошибка открытия</span>
-    {% elif e.action == 'skip-cooldown' %}<span class="pill n">повтор, пропущен</span>
-    {% elif e.action == 'gate-disabled' %}<span class="pill y">автооткрытие выключено</span>
-    {% elif e.plate and not e.allowed %}<span class="pill r">нет в белом списке</span>{% endif %}
-  </div>
-  {% if d.owner %}<div>👤 {{d.owner}}</div>{% endif %}
-  <div class="mut" style="margin-top:6px">
-    🕒 {{e.ts|dt}}{% if d.elapsed %} · обработка {{d.elapsed}} с{% endif %}{% if e.confidence %} · уверенность {{'%.0f%%'|format(e.confidence*100)}}{% endif %}<br>
-    {% if e.device_id %}📷 {{e.device_id}}/{{e.channel_id}} · {{e.msg_type}}{% if e.label_type %} · {{e.label_type}}{% endif %}{% endif %}
-  </div>
-  {% if d.info %}<pre>{{d.info}}</pre>{% endif %}
-  {% if e.plate and not e.allowed and d.role != 'exit' %}
-  <form method="post" action="/whitelist/add" class="row" style="margin-top:10px">
-    <input type="hidden" name="plates" value="{{e.plate}}">
-    <input name="owner" placeholder="Владелец (необязательно)" style="flex:1;min-width:160px">
-    <button class="sec">➕ В белый список</button>
-  </form>{% endif %}
+<a class="back" href="/">События</a>
+{% if d.role == 'exit' %}<h1 class="title">Выезд</h1>
+{% elif e.msg_type == 'manual' %}<h1 class="title">Открыто вручную</h1>
+{% elif e.plate %}<h1 class="title plate">{{e.plate}}</h1>
+{% else %}<h1 class="title">Номер не распознан</h1>{% endif %}
+<div class="row" style="margin-top:12px;gap:16px">
+  {% if e.action in ('open', 'open-manual') %}<span class="pill g">Шлагбаум открыт</span>
+  {% elif e.action == 'open-failed' %}<span class="pill r">Ошибка открытия</span>
+  {% elif e.action == 'skip-cooldown' %}<span class="pill">Повтор, пропущен</span>
+  {% elif e.action == 'gate-disabled' %}<span class="pill y">Автооткрытие выключено</span>
+  {% elif e.plate and not e.allowed %}<span class="pill r">Нет в белом списке</span>{% endif %}
+  {% if d.owner %}<span class="mut">{{d.owner}}</span>{% endif %}
 </div>
-<h2>Кадры ({{e.frames|length}})</h2>
+
+<div class="meta">
+  <div><span>Время</span><b>{{e.ts|dt}}</b></div>
+  {% if d.elapsed %}<div><span>Обработка</span><b>{{d.elapsed}} с</b></div>{% endif %}
+  {% if e.confidence %}<div><span>Уверенность</span><b>{{'%.0f%%'|format(e.confidence*100)}}</b></div>{% endif %}
+  {% if e.device_id %}<div><span>Камера</span><b>{{e.device_id}}/{{e.channel_id}}</b></div>
+  <div><span>Событие</span><b>{{e.label_type or e.msg_type}}</b></div>{% endif %}
+</div>
+{% if d.info %}<pre style="margin:-12px 0 28px">{{d.info}}</pre>{% endif %}
+
+{% if e.plate and not e.allowed and d.role != 'exit' %}
+<form method="post" action="/whitelist/add" class="card row">
+  <input type="hidden" name="plates" value="{{e.plate}}">
+  <input name="owner" placeholder="Владелец, необязательно" style="flex:1;min-width:180px">
+  <button>Добавить в белый список</button>
+</form>{% endif %}
+
+<h2 style="margin-top:36px">Кадры <span class="mut" style="font-weight:400;font-size:17px">{{e.frames|length}}</span></h2>
 <div class="frames">
 {% for f in e.frames %}
 <div class="fr {{'cover' if f.cover}}">
-  {% if f.file %}<img src="/snap/{{f.file}}" loading="lazy" onclick="lb(this.src)" alt="">{% else %}<div class="empty">кадр не получен</div>{% endif %}
-  <div class="cap">{% if f.cover %}<span class="pill g">обложка</span> {% endif %}{{f.note}}</div>
+  {% if f.file %}<img src="/snap/{{f.file}}" loading="lazy" onclick="lb(this.src)" alt="">{% else %}<div class="empty">Кадр не получен</div>{% endif %}
+  <div class="cap">{% if f.cover %}<b style="color:var(--text)">Обложка</b> · {% endif %}{{f.note}}</div>
 </div>
 {% else %}<div class="card empty">Фото нет</div>{% endfor %}
 </div>
 <div class="lb" id="lb" onclick="this.classList.remove('on')"><img id="lbi" alt=""></div>
 {% endblock %}
-{% block scripts %}<script>function lb(s){document.getElementById('lbi').src=s;document.getElementById('lb').classList.add('on')}</script>{% endblock %}
+{% block scripts %}<script>function lb(s){document.getElementById('lbi').src=s;document.getElementById('lb').classList.add('on')}
+document.addEventListener('keydown',e=>{if(e.key==='Escape')document.getElementById('lb').classList.remove('on')})</script>{% endblock %}

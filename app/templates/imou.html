@@ -1,5 +1,6 @@
 {% extends "base.html" %}{% block title %}Imou · Шлагбаум{% endblock %}
 {% block body %}
+<div class="pagehead"><h1>Imou</h1><p class="sub">Подключение к облаку камер и входящие события.</p></div>
 <div class="card"><h2>Подключение</h2>
 <div class="mut">App ID: <code>{{app_id or 'не задан'}}</code><br>API: <code>{{host}}</code></div>
 <form method="post" action="/imou/token" style="margin-top:10px"><button class="sec full-m">Проверить подключение</button></form></div>
@@ -22,8 +23,8 @@
 {% for r in raw %}{% set j = r.body|fromjson_safe %}
 <div class="item" style="display:block">
   <div class="row"><b>{{r.ts|dt}}</b>
-  {% if j.labelType %}<span class="pill {{'g' if j.labelType == 'carAlarm' else 'n'}}">{{j.labelType}}</span>{% endif %}
-  {% if j.msgType %}<span class="pill n">{{j.msgType}}</span>{% endif %}
+  {% if j.labelType %}<span class="pill {{'g' if j.labelType == 'carAlarm' else ''}}">{{j.labelType}}</span>{% endif %}
+  {% if j.msgType %}<span class="pill">{{j.msgType}}</span>{% endif %}
   <span class="sp"></span>
   <form class="inline" method="post" action="/imou/replay/{{r.id}}"><button class="sm sec">Обработать ещё раз</button></form></div>
   <details><summary class="mut">JSON</summary><pre>{{r.body}}</pre></details>

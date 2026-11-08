@@ -1,79 +1,94 @@
 {% extends "base.html" %}{% block title %}События · Шлагбаум{% endblock %}
 {% block head %}<style>
-.top{display:grid;grid-template-columns:1fr auto;gap:12px;align-items:center}
-.stats{display:flex;gap:18px;flex-wrap:wrap}.stats b{font-size:22px;display:block;line-height:1.1}
-.chips{display:flex;gap:6px;overflow-x:auto;padding:2px 0 8px;scrollbar-width:none}.chips::-webkit-scrollbar{display:none}
-.chip{padding:7px 13px;border-radius:999px;background:#fff;border:1px solid var(--line);text-decoration:none;color:#111;white-space:nowrap;font-size:14px}
-.chip.on{background:#111827;color:#fff;border-color:#111827}
-.evs{display:grid;grid-template-columns:repeat(auto-fill,minmax(260px,1fr));gap:12px}
-.ev{background:#fff;border-radius:var(--rad);overflow:hidden;box-shadow:0 1px 2px #0000000f;text-decoration:none;color:inherit;display:flex;flex-direction:column}
-.ev .ph{position:relative;aspect-ratio:16/10;background:#e5e7eb center/cover no-repeat}
-.ev .ph .cnt{position:absolute;right:8px;bottom:8px;background:#000a;color:#fff;font-size:12px;padding:2px 7px;border-radius:6px}
-.ev .ph .noimg{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;color:var(--m);font-size:32px}
-.ev .bd{padding:10px 12px;display:flex;flex-direction:column;gap:6px}
-.ev .l1{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
-@media (max-width:600px){.top{grid-template-columns:1fr}.evs{grid-template-columns:1fr}.ev{flex-direction:row}.ev .ph{width:42%;aspect-ratio:auto;min-height:100px;flex:none}.ev .bd{min-width:0}}
+.hero{display:flex;align-items:flex-end;gap:24px;flex-wrap:wrap;margin:8px 0 32px}
+.hero .t{flex:1;min-width:240px}
+.stats{display:grid;grid-template-columns:repeat(3,1fr);gap:1px;background:var(--line2);border-radius:var(--rad);overflow:hidden;margin-bottom:28px}
+.stats div{background:var(--card);padding:20px 24px}
+.stats b{display:block;font-size:34px;font-weight:600;letter-spacing:-.03em;line-height:1.1}
+.stats span{color:var(--text2);font-size:14px}
+.seg{display:flex;gap:4px;overflow-x:auto;scrollbar-width:none;background:rgba(0,0,0,.05);border-radius:10px;padding:3px;margin-bottom:14px;width:max-content;max-width:100%}
+.seg::-webkit-scrollbar{display:none}
+.seg a{padding:6px 14px;border-radius:8px;color:var(--text);font-size:14px;white-space:nowrap}
+.seg a:hover{text-decoration:none;background:rgba(255,255,255,.5)}
+.seg a.on{background:#fff;box-shadow:0 1px 3px rgba(0,0,0,.12);font-weight:500}
+.search{display:flex;gap:10px;margin-bottom:24px}
+.search input{border-radius:980px;padding-left:40px;background:#fff url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16'%3E%3Ccircle cx='7' cy='7' r='5.5' fill='none' stroke='%2386868b' stroke-width='1.6'/%3E%3Cpath d='M11 11l4 4' stroke='%2386868b' stroke-width='1.6'/%3E%3C/svg%3E") no-repeat 15px center}
+.evs{display:grid;grid-template-columns:repeat(auto-fill,minmax(290px,1fr));gap:20px}
+.ev{background:var(--card);border-radius:var(--rad);overflow:hidden;color:inherit;display:flex;flex-direction:column;transition:transform .25s,box-shadow .25s}
+.ev:hover{text-decoration:none;transform:translateY(-2px);box-shadow:0 12px 30px rgba(0,0,0,.08)}
+.ev .ph{position:relative;aspect-ratio:4/3;background:#e8e8ed center/cover no-repeat}
+.ev .ph .cnt{position:absolute;right:12px;bottom:12px;background:rgba(0,0,0,.55);backdrop-filter:blur(10px);-webkit-backdrop-filter:blur(10px);color:#fff;font-size:12px;padding:3px 9px;border-radius:980px}
+.ev .ph .noimg{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;color:var(--text3);font-size:15px}
+.ev .bd{padding:16px 20px 20px;display:flex;flex-direction:column;gap:6px}
+.ev .tt{font-size:21px;font-weight:600;letter-spacing:-.01em}
+.ev .tt.plate{font-size:22px}
+@media (max-width:640px){
+  .hero{margin-bottom:20px}.hero form{width:100%}
+  .stats div{padding:14px 16px}.stats b{font-size:26px}
+  .evs{grid-template-columns:1fr;gap:12px}
+  .ev{flex-direction:row}.ev .ph{width:38%;aspect-ratio:auto;min-height:118px;flex:none}
+  .ev .bd{padding:12px 14px;min-width:0}.ev .tt{font-size:18px}.ev .tt.plate{font-size:19px}
+}
 </style>{% endblock %}
 {% block body %}
-<div class="card top">
-  <div class="stats">
-    <div><b>{{stats.total}}</b><span class="mut">событий сегодня</span></div>
-    <div><b style="color:var(--g)">{{stats.opened}}</b><span class="mut">открытий</span></div>
-    <div><b style="color:var(--r)">{{stats.denied}}</b><span class="mut">не в списке</span></div>
-  </div>
+<div class="hero">
+  <div class="t"><h1>События</h1><p class="sub">Въезды и выезды в реальном времени.</p></div>
   <form method="post" action="/gate/open" onsubmit="return confirm('Открыть шлагбаум сейчас?')">
-    <button class="big green full-m">🔓 Открыть шлагбаум</button>
+    <button class="big dark full-m">Открыть шлагбаум</button>
   </form>
 </div>
-{% if not gate_enabled %}<div class="flash e">⏸ Автооткрытие выключено в <a href="/settings">настройках</a>. Ручная кнопка работает.</div>{% endif %}
-{% if not cam_count %}<div class="flash e">Нет активных камер. <a href="/cameras">Добавьте камеру</a>.</div>{% endif %}
+{% if not gate_enabled %}<div class="flash e">Автооткрытие выключено в&nbsp;<a href="/settings">настройках</a>. Ручная кнопка работает.</div>{% endif %}
+{% if not cam_count %}<div class="flash e">Нет активных камер.&nbsp;<a href="/cameras">Добавить камеру</a></div>{% endif %}
 
-<div class="chips">
-{% for key, title in [('', 'Все'), ('allowed', '✅ Разрешён'), ('denied', '🚫 Не в списке'), ('unknown', '❓ Не распознан'), ('exit', '⬅️ Выезд'), ('manual', '🔓 Вручную')] %}
-<a class="chip {{'on' if f == key}}" href="/?f={{key}}{% if q %}&q={{q}}{% endif %}">{{title}}</a>
+<div class="stats">
+  <div><b>{{stats.total}}</b><span>событий сегодня</span></div>
+  <div><b style="color:var(--g)">{{stats.opened}}</b><span>открытий</span></div>
+  <div><b style="color:var(--r)">{{stats.denied}}</b><span>не в списке</span></div>
+</div>
+
+<div class="seg">
+{% for key, title in [('', 'Все'), ('allowed', 'Разрешён'), ('denied', 'Не в списке'), ('unknown', 'Не распознан'), ('exit', 'Выезд'), ('manual', 'Вручную')] %}
+<a class="{{'on' if f == key}}" href="/?f={{key}}{% if q %}&q={{q}}{% endif %}">{{title}}</a>
 {% endfor %}
 </div>
-<form class="row" method="get" action="/" style="margin-bottom:12px">
+<form class="search" method="get" action="/">
   <input type="hidden" name="f" value="{{f}}">
-  <input name="q" value="{{q}}" placeholder="Поиск по номеру" style="flex:1;min-width:0" autocapitalize="characters">
-  <button class="sec">Найти</button>
-  {% if q %}<a class="btn sec" href="/?f={{f}}">×</a>{% endif %}
+  <input name="q" value="{{q}}" placeholder="Поиск по номеру" autocapitalize="characters" enterkeyhint="search">
+  {% if q %}<a class="btn sec" href="/?f={{f}}">Сбросить</a>{% endif %}
 </form>
 
 <div class="evs" id="evs">
 {% for e in events %}{% set d = e.details|fromjson %}{% set nimg = e.frames|selectattr('file')|list|length %}
 <a class="ev" href="/event/{{e.id}}">
   <div class="ph" {% if e.image %}style="background-image:url('/snap/{{e.image}}')"{% endif %}>
-    {% if not e.image %}<div class="noimg">{{'🔓' if e.msg_type == 'manual' else '📷'}}</div>{% endif %}
-    {% if nimg > 1 %}<span class="cnt">📷 {{nimg}}</span>{% endif %}
+    {% if not e.image %}<div class="noimg">{{'Открыто вручную' if e.msg_type == 'manual' else 'Нет фото'}}</div>{% endif %}
+    {% if nimg > 1 %}<span class="cnt">{{nimg}} фото</span>{% endif %}
   </div>
   <div class="bd">
-    <div class="l1">
-      {% if d.role == 'exit' %}<span class="pill b">⬅️ Выезд</span>
-      {% elif e.msg_type == 'manual' %}<span class="pill b">🔓 Вручную</span>
-      {% elif e.plate %}<span class="plate">{{e.plate}}</span>
-      {% else %}<span class="pill n">номер не распознан</span>{% endif %}
-    </div>
-    <div class="l1">
-      {% if e.action in ('open', 'open-manual') %}<span class="pill g">открыт</span>
-      {% elif e.action == 'open-failed' %}<span class="pill r">ошибка открытия</span>
-      {% elif e.action == 'skip-cooldown' %}<span class="pill n">повтор, пропущен</span>
-      {% elif e.action == 'gate-disabled' %}<span class="pill y">автооткрытие выкл.</span>
-      {% elif e.plate and not e.allowed %}<span class="pill r">не в списке</span>{% endif %}
+    {% if d.role == 'exit' %}<div class="tt">Выезд</div>
+    {% elif e.msg_type == 'manual' %}<div class="tt">Вручную</div>
+    {% elif e.plate %}<div class="tt plate">{{e.plate}}</div>
+    {% else %}<div class="tt" style="color:var(--text2)">Не распознан</div>{% endif %}
+    <div class="row" style="gap:14px">
+      {% if e.action in ('open', 'open-manual') %}<span class="pill g">Открыт</span>
+      {% elif e.action == 'open-failed' %}<span class="pill r">Ошибка открытия</span>
+      {% elif e.action == 'skip-cooldown' %}<span class="pill">Повтор</span>
+      {% elif e.action == 'gate-disabled' %}<span class="pill y">Автооткрытие выкл.</span>
+      {% elif e.plate and not e.allowed %}<span class="pill r">Не в списке</span>{% endif %}
       {% if d.owner and d.role != 'manual' %}<span class="mut">{{d.owner}}</span>{% endif %}
     </div>
-    <div class="mut">{{e.ts|dt}} · {{e.cam_name if e.msg_type != 'manual' else (d.owner or 'админка')}}{% if e.confidence %} · {{'%.0f%%'|format(e.confidence*100)}}{% endif %}</div>
+    <div class="mut">{{e.ts|dt}} · {{e.cam_name if e.msg_type != 'manual' else (d.owner or 'админка')}}</div>
   </div>
 </a>
-{% else %}<div class="card empty" style="grid-column:1/-1">Событий нет{% if f or q %} по этому фильтру{% endif %}</div>{% endfor %}
+{% else %}<div class="card empty" style="grid-column:1/-1">Событий нет{% if f or q %} по этому фильтру{% endif %}.</div>{% endfor %}
 </div>
-{% if more %}<p style="text-align:center"><a class="btn sec" href="/?f={{f}}&q={{q}}&limit={{limit + 40}}">Показать ещё</a></p>{% endif %}
+{% if more %}<p style="text-align:center;margin-top:28px"><a class="btn sec" href="/?f={{f}}&q={{q}}&limit={{limit + 40}}">Показать ещё</a></p>{% endif %}
 
-<details class="card" style="margin-top:12px"><summary>Проверить распознавание на своём фото</summary>
-<form method="post" action="/test/recognize" enctype="multipart/form-data" class="row" style="margin-top:10px">
+<details class="card" style="margin-top:36px"><summary>Проверить распознавание на фото</summary>
+<form method="post" action="/test/recognize" enctype="multipart/form-data" class="row" style="margin-top:16px">
 <input type="file" name="file" accept="image/*" required style="flex:1"> <button>Распознать</button></form></details>
 
-<p class="mut" style="text-align:center"><label class="chk" style="justify-content:center"><input type="checkbox" id="auto"> Обновлять автоматически</label></p>
+<label class="chk" style="max-width:320px;margin:8px auto 0;border:0"><input type="checkbox" id="auto"> Обновлять автоматически</label>
 {% endblock %}
 {% block scripts %}<script>
 const cb = document.getElementById('auto');
