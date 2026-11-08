@@ -1,18 +1,90 @@
-{% extends "base.html" %}{% block body %}
-<div class="card"><h2>Проверить распознавание на фото</h2>
-<form method="post" action="/test/recognize" enctype="multipart/form-data">
-<input type="file" name="file" accept="image/*" required> <button>Распознать</button></form></div>
-<div class="card"><h2>Последние события</h2>
-<table><tr><th>Время</th><th>Снимок</th><th>Номер</th><th>Уверенн.</th><th>Доступ</th><th>Действие</th><th>Камера / событие</th></tr>
-{% for e in events %}{% set d = e.details|fromjson %}
-<tr><td>{{e.ts|dt}}</td>
-<td style="white-space:nowrap"><a href="/event/{{e.id}}">{% for f in e.frames %}{% if f.file %}<img class="th" src="/snap/{{f.file}}" title="{{f.note}}"> {% endif %}{% endfor %}</a>
-<div class="mut"><a href="/event/{{e.id}}">все фото ({{e.frames|length}})</a></div></td>
-<td class="plate">{% if d.role == 'exit' %}<span class="mut">выезд</span>{% else %}{{e.plate or '—'}}{% endif %}{% if d.owner %}<div class="mut">{{d.owner}}</div>{% endif %}</td>
-<td>{{ '%.0f%%'|format(e.confidence*100) if e.confidence else '' }}</td>
-<td>{% if d.role == 'exit' %}<span class="ok">выезд</span>{% elif e.allowed %}<span class="ok">разрешён</span>{% elif e.plate %}<span class="no">нет в списке</span>{% endif %}</td>
-<td>{{e.action}}<div class="mut">{{d.info}} {% if d.elapsed %}· {{d.elapsed}} с{% endif %}</div></td>
-<td class="mut">{{e.device_id}}/{{e.channel_id}}<br>{{e.msg_type}}{% if e.label_type %} · {{e.label_type}}{% endif %}</td></tr>
-{% else %}<tr><td colspan="7" class="mut">Событий пока нет</td></tr>{% endfor %}
-</table></div>
+{% extends "base.html" %}{% block title %}События · Шлагбаум{% endblock %}
+{% block head %}<style>
+.top{display:grid;grid-template-columns:1fr auto;gap:12px;align-items:center}
+.stats{display:flex;gap:18px;flex-wrap:wrap}.stats b{font-size:22px;display:block;line-height:1.1}
+.chips{display:flex;gap:6px;overflow-x:auto;padding:2px 0 8px;scrollbar-width:none}.chips::-webkit-scrollbar{display:none}
+.chip{padding:7px 13px;border-radius:999px;background:#fff;border:1px solid var(--line);text-decoration:none;color:#111;white-space:nowrap;font-size:14px}
+.chip.on{background:#111827;color:#fff;border-color:#111827}
+.evs{display:grid;grid-template-columns:repeat(auto-fill,minmax(260px,1fr));gap:12px}
+.ev{background:#fff;border-radius:var(--rad);overflow:hidden;box-shadow:0 1px 2px #0000000f;text-decoration:none;color:inherit;display:flex;flex-direction:column}
+.ev .ph{position:relative;aspect-ratio:16/10;background:#e5e7eb center/cover no-repeat}
+.ev .ph .cnt{position:absolute;right:8px;bottom:8px;background:#000a;color:#fff;font-size:12px;padding:2px 7px;border-radius:6px}
+.ev .ph .noimg{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;color:var(--m);font-size:32px}
+.ev .bd{padding:10px 12px;display:flex;flex-direction:column;gap:6px}
+.ev .l1{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+@media (max-width:600px){.top{grid-template-columns:1fr}.evs{grid-template-columns:1fr}.ev{flex-direction:row}.ev .ph{width:42%;aspect-ratio:auto;min-height:100px;flex:none}.ev .bd{min-width:0}}
+</style>{% endblock %}
+{% block body %}
+<div class="card top">
+  <div class="stats">
+    <div><b>{{stats.total}}</b><span class="mut">событий сегодня</span></div>
+    <div><b style="color:var(--g)">{{stats.opened}}</b><span class="mut">открытий</span></div>
+    <div><b style="color:var(--r)">{{stats.denied}}</b><span class="mut">не в списке</span></div>
+  </div>
+  <form method="post" action="/gate/open" onsubmit="return confirm('Открыть шлагбаум сейчас?')">
+    <button class="big green full-m">🔓 Открыть шлагбаум</button>
+  </form>
+</div>
+{% if not gate_enabled %}<div class="flash e">⏸ Автооткрытие выключено в <a href="/settings">настройках</a>. Ручная кнопка работает.</div>{% endif %}
+{% if not cam_count %}<div class="flash e">Нет активных камер. <a href="/cameras">Добавьте камеру</a>.</div>{% endif %}
+
+<div class="chips">
+{% for key, title in [('', 'Все'), ('allowed', '✅ Разрешён'), ('denied', '🚫 Не в списке'), ('unknown', '❓ Не распознан'), ('exit', '⬅️ Выезд'), ('manual', '🔓 Вручную')] %}
+<a class="chip {{'on' if f == key}}" href="/?f={{key}}{% if q %}&q={{q}}{% endif %}">{{title}}</a>
+{% endfor %}
+</div>
+<form class="row" method="get" action="/" style="margin-bottom:12px">
+  <input type="hidden" name="f" value="{{f}}">
+  <input name="q" value="{{q}}" placeholder="Поиск по номеру" style="flex:1;min-width:0" autocapitalize="characters">
+  <button class="sec">Найти</button>
+  {% if q %}<a class="btn sec" href="/?f={{f}}">×</a>{% endif %}
+</form>
+
+<div class="evs" id="evs">
+{% for e in events %}{% set d = e.details|fromjson %}{% set nimg = e.frames|selectattr('file')|list|length %}
+<a class="ev" href="/event/{{e.id}}">
+  <div class="ph" {% if e.image %}style="background-image:url('/snap/{{e.image}}')"{% endif %}>
+    {% if not e.image %}<div class="noimg">{{'🔓' if e.msg_type == 'manual' else '📷'}}</div>{% endif %}
+    {% if nimg > 1 %}<span class="cnt">📷 {{nimg}}</span>{% endif %}
+  </div>
+  <div class="bd">
+    <div class="l1">
+      {% if d.role == 'exit' %}<span class="pill b">⬅️ Выезд</span>
+      {% elif e.msg_type == 'manual' %}<span class="pill b">🔓 Вручную</span>
+      {% elif e.plate %}<span class="plate">{{e.plate}}</span>
+      {% else %}<span class="pill n">номер не распознан</span>{% endif %}
+    </div>
+    <div class="l1">
+      {% if e.action in ('open', 'open-manual') %}<span class="pill g">открыт</span>
+      {% elif e.action == 'open-failed' %}<span class="pill r">ошибка открытия</span>
+      {% elif e.action == 'skip-cooldown' %}<span class="pill n">повтор, пропущен</span>
+      {% elif e.action == 'gate-disabled' %}<span class="pill y">автооткрытие выкл.</span>
+      {% elif e.plate and not e.allowed %}<span class="pill r">не в списке</span>{% endif %}
+      {% if d.owner and d.role != 'manual' %}<span class="mut">{{d.owner}}</span>{% endif %}
+    </div>
+    <div class="mut">{{e.ts|dt}} · {{e.cam_name if e.msg_type != 'manual' else (d.owner or 'админка')}}{% if e.confidence %} · {{'%.0f%%'|format(e.confidence*100)}}{% endif %}</div>
+  </div>
+</a>
+{% else %}<div class="card empty" style="grid-column:1/-1">Событий нет{% if f or q %} по этому фильтру{% endif %}</div>{% endfor %}
+</div>
+{% if more %}<p style="text-align:center"><a class="btn sec" href="/?f={{f}}&q={{q}}&limit={{limit + 40}}">Показать ещё</a></p>{% endif %}
+
+<details class="card" style="margin-top:12px"><summary>Проверить распознавание на своём фото</summary>
+<form method="post" action="/test/recognize" enctype="multipart/form-data" class="row" style="margin-top:10px">
+<input type="file" name="file" accept="image/*" required style="flex:1"> <button>Распознать</button></form></details>
+
+<p class="mut" style="text-align:center"><label class="chk" style="justify-content:center"><input type="checkbox" id="auto"> Обновлять автоматически</label></p>
 {% endblock %}
+{% block scripts %}<script>
+const cb = document.getElementById('auto');
+cb.checked = localStorage.getItem('auto') !== '0';
+cb.onchange = () => localStorage.setItem('auto', cb.checked ? '1' : '0');
+setInterval(async () => {
+  if (!cb.checked || document.hidden || document.activeElement.tagName === 'INPUT') return;
+  try {
+    const r = await fetch(location.href); const t = await r.text();
+    const n = new DOMParser().parseFromString(t, 'text/html');
+    document.getElementById('evs').innerHTML = n.getElementById('evs').innerHTML;
+  } catch (e) {}
+}, 10000);
+</script>{% endblock %}

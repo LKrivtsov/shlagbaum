@@ -233,6 +233,18 @@ def _save_frame(img, results, cam, note) -> tuple[str, bytes]:
     return fname, jpg
 
 
+async def open_manual(user: str):
+    """Ручное открытие из админки."""
+    s = db.get_settings()
+    s = dict(s, gate_enabled="1")  # ручное открытие работает даже при выключенном автооткрытии
+    action, info = await _open_gate(s)
+    action = "open-manual" if action == "open" else action
+    db.event_add(device_id="", channel_id="", msg_type="manual", label_type="", plate=None, confidence=None,
+                 allowed=1, action=action, details=json.dumps({"info": info, "role": "manual", "owner": user},
+                                                              ensure_ascii=False), image=None, images="[]")
+    return action, info
+
+
 async def _open_gate(s):
     if s.get("gate_enabled") != "1":
         return "gate-disabled", ""
@@ -279,7 +291,7 @@ async def _process_exit(cam, msg_type, pictures, do_actions, label_type):
             h, w = img.shape[:2]
             note = f"{SOURCE_NAMES.get(mode, mode)} {w}x{h}"
             fname, jpg = await asyncio.to_thread(_save_frame, img, [], cam, note)
-            frames.append({"file": fname, "note": note})
+            frames.append({"file": fname, "note": note, "cover": True})
     except Exception as e:
         details = f"кадр не получен: {e}"
     finally:
@@ -312,7 +324,9 @@ async def _process_entry(cam, msg_type, pictures, do_actions, label_type):
     kz_only = s.get("kz_format_only") == "1"
     t0 = time.time()
 
-    best, best_jpg, errors, frames = None, None, [], []
+    best, errors, frames = None, [], []
+    best_idx = None              # кадр с лучшим номером
+    det_idx, det_score = None, 0.0  # кадр, где детектор видел номерную рамку (значит, есть машина)
     src = FrameSource(cam, pictures, s)
     try:
         for i in range(attempts):
@@ -320,28 +334,42 @@ async def _process_entry(cam, msg_type, pictures, do_actions, label_type):
                 img, mode = await src.get()
                 if img is None:
                     raise RuntimeError("пустой кадр")
-                results = await asyncio.to_thread(anpr.get().recognize, img)
+                results, n_dets, max_det = await asyncio.to_thread(anpr.get().recognize, img, True)
                 h, w = img.shape[:2]
-                found = ", ".join(f"{r.plate} {r.confidence:.0%}" for r in results) or "номер не найден"
-                note = f"{i + 1}/{attempts} {SOURCE_NAMES.get(mode, mode)} {w}x{h}: {found}"
-                fname, jpg = await asyncio.to_thread(_save_frame, img, results, cam, f"{i + 1}/{attempts} {w}x{h}")
-                frames.append({"file": fname, "note": note})
+                found = ", ".join(f"{r.plate} {r.confidence:.0%}" for r in results) or \
+                    ("номер виден, но не прочитан" if n_dets else "номер не найден")
+                note = f"{i + 1}/{attempts} · {SOURCE_NAMES.get(mode, mode)} {w}×{h} · {found}"
+                fname, _ = await asyncio.to_thread(_save_frame, img, results, cam, f"{i + 1}/{attempts} {w}x{h}")
+                frames.append({"file": fname, "note": note, "plates": [r.plate for r in results], "dets": n_dets})
+                idx = len(frames) - 1
+                if max_det > det_score:
+                    det_idx, det_score = idx, max_det
                 for r in results:
                     if kz_only and not r.kz_valid:
                         continue
                     if best is None or r.score > best.score:
-                        best, best_jpg = r, jpg
+                        best, best_idx = r, idx
                 if best and best.confidence >= min_conf and (best.kz_valid or not kz_only):
                     if match_whitelist(best.plate, s) or best.confidence > 0.95:
                         break
             except Exception as e:
                 errors.append(f"кадр {i + 1}: {e}")
-                frames.append({"file": None, "note": f"{i + 1}/{attempts}: ошибка — {e}"})
+                frames.append({"file": None, "note": f"{i + 1}/{attempts} · ошибка: {e}"})
                 log.warning("попытка %s: %s", i + 1, e)
             if i < attempts - 1:
                 await asyncio.sleep(interval)
     finally:
         src.close()
+
+    # обложка события: кадр с номером -> кадр, где видна номерная рамка -> первый кадр
+    # (событие приходит, когда машина уже в кадре, поэтому первый кадр надёжнее последнего)
+    saved_idx = [k for k, f in enumerate(frames) if f["file"]]
+    cover_idx = best_idx if best_idx is not None else det_idx if det_idx is not None else \
+        (saved_idx[0] if saved_idx else None)
+    if cover_idx is not None:
+        frames[cover_idx]["cover"] = True
+    cover = frames[cover_idx]["file"] if cover_idx is not None else None
+    best_jpg = (config.SNAP_DIR / cover).read_bytes() if cover else None
 
     plate = best.plate if best and best.confidence >= min_conf else None
     matched = match_whitelist(plate, s) if plate else None
@@ -357,16 +385,13 @@ async def _process_entry(cam, msg_type, pictures, do_actions, label_type):
     elif not plate:
         details = "; ".join(errors)[:500] if errors else "номер не найден"
 
-    saved = [f for f in frames if f["file"]]
-    if best_jpg is None and saved:
-        best_jpg = (config.SNAP_DIR / saved[-1]["file"]).read_bytes()
     ev_id = db.event_add(
         device_id=cam["device_id"], channel_id=cam["channel_id"], msg_type=msg_type, label_type=label_type,
         plate=plate or (best.plate if best else None), confidence=best.confidence if best else None,
         allowed=int(allowed), action=action,
         details=json.dumps({"info": details, "owner": matched[0]["owner"] if matched else "", "role": "entry",
                             "elapsed": round(time.time() - t0, 2)}, ensure_ascii=False),
-        image=saved[0]["file"] if saved else None, images=json.dumps(frames, ensure_ascii=False),
+        image=cover, images=json.dumps(frames, ensure_ascii=False),
     )
 
     if do_actions:

@@ -23,6 +23,17 @@ app = FastAPI(title="Plate Gate", docs_url=None, redoc_url=None)
 templates = Jinja2Templates(directory=str(__import__("pathlib").Path(__file__).parent / "templates"))
 templates.env.filters["dt"] = lambda ts: datetime.fromtimestamp(ts, config.TZ).strftime("%d.%m %H:%M:%S") if ts else ""
 templates.env.filters["fromjson"] = lambda s: json.loads(s) if s else {}
+
+
+def _fromjson_safe(s):
+    try:
+        v = json.loads(s or "{}")
+        return v if isinstance(v, dict) else {}
+    except Exception:
+        return {}
+
+
+templates.env.filters["fromjson_safe"] = _fromjson_safe
 security = HTTPBasic()
 
 
@@ -106,8 +117,26 @@ async def _safe_handle(m):
 
 # ================= Админка =================
 @app.get("/", response_class=HTMLResponse)
-def dashboard(request: Request, user=Depends(auth)):
-    return render(request, "dashboard.html", events=db.events(100), cameras=db.cameras())
+def dashboard(request: Request, f: str = "", q: str = "", limit: int = 40, user=Depends(auth)):
+    limit = max(10, min(limit, 500))
+    q = anpr.normalize(q)
+    evs = db.events(limit, f, q)
+    cams = {(c["device_id"], str(c["channel_id"])): c for c in db.cameras()}
+    for e in evs:
+        cam = cams.get((e["device_id"], str(e["channel_id"])))
+        e["cam_name"] = (cam["name"] if cam else "") or e["device_id"] or "—"
+    midnight = datetime.now(config.TZ).replace(hour=0, minute=0, second=0, microsecond=0).timestamp()
+    return render(request, "dashboard.html", events=evs, f=f, q=q, limit=limit, more=len(evs) >= limit,
+                  stats=db.stats_today(midnight), gate_enabled=db.get_settings().get("gate_enabled") == "1",
+                  wl_count=len(db.whitelist(True)), cam_count=len(db.cameras(True)))
+
+
+@app.post("/gate/open")
+async def gate_open(user=Depends(auth)):
+    action, info = await processor.open_manual(user)
+    ok = action == "open-manual"
+    return back("/", ("Шлагбаум: команда отправлена" if ok else "Не удалось открыть") + (f" ({info})" if info else ""),
+                not ok)
 
 
 @app.get("/snap/{name}")
@@ -138,6 +167,13 @@ async def test_recognize(request: Request, file: UploadFile = File(...), user=De
 
 
 # ---- белый список ----
+@app.post("/whitelist/{wid}/owner")
+def wl_owner(wid: int, owner: str = Form(""), user=Depends(auth)):
+    with db.cursor() as c:
+        c.execute("UPDATE whitelist SET owner=? WHERE id=?", (owner.strip(), wid))
+    return back("/whitelist", "Сохранено")
+
+
 @app.get("/whitelist", response_class=HTMLResponse)
 def wl_page(request: Request, user=Depends(auth)):
     return render(request, "whitelist.html", items=db.whitelist())
@@ -210,6 +246,15 @@ async def cam_import(user=Depends(auth)):
 def cam_del(cid: int, user=Depends(auth)):
     db.camera_delete(cid)
     return back("/cameras", "Удалено")
+
+
+@app.post("/cameras/{cid}/edit")
+def cam_edit(cid: int, name: str = Form(""), rtsp_url: str = Form(""), role: str = Form("entry"), user=Depends(auth)):
+    cam = db.camera_get(cid)
+    if cam:
+        db.camera_upsert(cam["device_id"], cam["channel_id"], name.strip(), rtsp_url.strip(),
+                         role if role in ("entry", "exit") else "entry")
+    return back("/cameras", "Камера сохранена")
 
 
 @app.post("/cameras/{cid}/role")
@@ -302,7 +347,14 @@ def settings_page(request: Request, user=Depends(auth)):
 
 @app.post("/settings")
 async def settings_save(request: Request, user=Depends(auth)):
+    await _save_form(request)
+    return back("/settings", "Сохранено")
+
+
+async def _save_form(request: Request):
     form = await request.form()
+    if not form.get("_section"):
+        return
     vals = {k: v for k, v in form.items() if k in config.DEFAULT_SETTINGS}
     # чекбоксы: отсутствуют в форме, если сняты
     for k in ("kz_format_only", "gate_enabled", "tg_notify_allowed", "tg_notify_denied",
@@ -312,7 +364,6 @@ async def settings_save(request: Request, user=Depends(auth)):
     if "sip_password" in vals and vals["sip_password"] == "********":
         vals.pop("sip_password")
     db.set_settings(vals)
-    return back("/settings", "Сохранено")
 
 
 def _section_of(k):
@@ -320,13 +371,15 @@ def _section_of(k):
 
 
 @app.post("/settings/test-telegram")
-async def test_tg(user=Depends(auth)):
-    errs = await telegram.send(db.get_settings(), "✅ Тест: уведомления Plate Gate работают")
+async def test_tg(request: Request, user=Depends(auth)):
+    await _save_form(request)  # кнопка теста сначала сохраняет введённое
+    errs = await telegram.send(db.get_settings(), "✅ Тест: уведомления шлагбаума работают")
     return back("/settings", "Ошибки: " + "; ".join(errs) if errs else "Сообщение отправлено", bool(errs))
 
 
 @app.post("/settings/test-sip")
-async def test_sip(user=Depends(auth)):
+async def test_sip(request: Request, user=Depends(auth)):
+    await _save_form(request)
     try:
         res = await asyncio.to_thread(sip.call, sip.SipConfig.from_settings(db.get_settings()))
         txt = f"{'OK' if res['ok'] else 'Не удалось'}: {res['status']} за {res['duration']} с. Трасса: {' | '.join(res['trace'])}"

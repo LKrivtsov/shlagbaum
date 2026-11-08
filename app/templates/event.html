@@ -1,13 +1,51 @@
-{% extends "base.html" %}{% block body %}{% set d = e.details|fromjson %}
-<div class="card"><h2>Событие #{{e.id}} · {{e.ts|dt}}</h2>
-<p>{% if d.role == 'exit' %}<b>Выезд</b>{% else %}Номер: <span class="plate">{{e.plate or '—'}}</span>
-{% if e.confidence %}({{'%.0f%%'|format(e.confidence*100)}}){% endif %}
-{% if e.allowed %}<span class="ok">в белом списке</span>{% elif e.plate %}<span class="no">нет в списке</span>{% endif %}{% endif %}
-· действие: <b>{{e.action}}</b> {{d.info}} · {{d.elapsed}} с</p>
-<p class="mut">Камера {{e.device_id}}/{{e.channel_id}} · {{e.msg_type}}{% if e.label_type %} · labelType={{e.label_type}}{% endif %}</p>
-<a href="/">← к событиям</a></div>
-{% for f in e.frames %}<div class="card"><h2 style="font-size:15px">{{f.note}}</h2>
-{% if f.file %}<a href="/snap/{{f.file}}" target="_blank"><img src="/snap/{{f.file}}" style="max-width:100%;border-radius:8px"></a>
-{% else %}<span class="mut">кадр не получен</span>{% endif %}</div>
-{% else %}<div class="card mut">Фото нет</div>{% endfor %}
+{% extends "base.html" %}{% block title %}Событие #{{e.id}}{% endblock %}
+{% block head %}<style>
+.frames{display:grid;grid-template-columns:repeat(auto-fill,minmax(300px,1fr));gap:12px}
+.fr{background:#fff;border-radius:var(--rad);overflow:hidden;box-shadow:0 1px 2px #0000000f}
+.fr.cover{outline:3px solid var(--g)}
+.fr img{width:100%;display:block;cursor:zoom-in}
+.fr .cap{padding:8px 10px;font-size:13px}
+.lb{position:fixed;inset:0;background:#000e;display:none;align-items:center;justify-content:center;z-index:50}
+.lb img{max-width:100%;max-height:100%}
+.lb.on{display:flex}
+@media (max-width:600px){.frames{grid-template-columns:1fr}}
+</style>{% endblock %}
+{% block body %}{% set d = e.details|fromjson %}
+<p><a href="/">← к событиям</a></p>
+<div class="card">
+  <div class="row" style="margin-bottom:8px">
+    {% if d.role == 'exit' %}<span class="pill b">⬅️ Выезд</span>
+    {% elif e.msg_type == 'manual' %}<span class="pill b">🔓 Открыто вручную</span>
+    {% elif e.plate %}<span class="plate" style="font-size:22px">{{e.plate}}</span>
+    {% else %}<span class="pill n">номер не распознан</span>{% endif %}
+    {% if e.action in ('open', 'open-manual') %}<span class="pill g">шлагбаум открыт</span>
+    {% elif e.action == 'open-failed' %}<span class="pill r">ошибка открытия</span>
+    {% elif e.action == 'skip-cooldown' %}<span class="pill n">повтор, пропущен</span>
+    {% elif e.action == 'gate-disabled' %}<span class="pill y">автооткрытие выключено</span>
+    {% elif e.plate and not e.allowed %}<span class="pill r">нет в белом списке</span>{% endif %}
+  </div>
+  {% if d.owner %}<div>👤 {{d.owner}}</div>{% endif %}
+  <div class="mut" style="margin-top:6px">
+    🕒 {{e.ts|dt}}{% if d.elapsed %} · обработка {{d.elapsed}} с{% endif %}{% if e.confidence %} · уверенность {{'%.0f%%'|format(e.confidence*100)}}{% endif %}<br>
+    {% if e.device_id %}📷 {{e.device_id}}/{{e.channel_id}} · {{e.msg_type}}{% if e.label_type %} · {{e.label_type}}{% endif %}{% endif %}
+  </div>
+  {% if d.info %}<pre>{{d.info}}</pre>{% endif %}
+  {% if e.plate and not e.allowed and d.role != 'exit' %}
+  <form method="post" action="/whitelist/add" class="row" style="margin-top:10px">
+    <input type="hidden" name="plates" value="{{e.plate}}">
+    <input name="owner" placeholder="Владелец (необязательно)" style="flex:1;min-width:160px">
+    <button class="sec">➕ В белый список</button>
+  </form>{% endif %}
+</div>
+<h2>Кадры ({{e.frames|length}})</h2>
+<div class="frames">
+{% for f in e.frames %}
+<div class="fr {{'cover' if f.cover}}">
+  {% if f.file %}<img src="/snap/{{f.file}}" loading="lazy" onclick="lb(this.src)" alt="">{% else %}<div class="empty">кадр не получен</div>{% endif %}
+  <div class="cap">{% if f.cover %}<span class="pill g">обложка</span> {% endif %}{{f.note}}</div>
+</div>
+{% else %}<div class="card empty">Фото нет</div>{% endfor %}
+</div>
+<div class="lb" id="lb" onclick="this.classList.remove('on')"><img id="lbi" alt=""></div>
 {% endblock %}
+{% block scripts %}<script>function lb(s){document.getElementById('lbi').src=s;document.getElementById('lb').classList.add('on')}</script>{% endblock %}

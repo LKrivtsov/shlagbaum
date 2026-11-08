@@ -1,14 +1,31 @@
-{% extends "base.html" %}{% block body %}
-<div class="card"><h2>Добавить номера</h2>
-<form method="post" action="/whitelist/add">
-<label>Номера — по одному в строке, после номера через пробел можно указать владельца (кириллица тоже понимается)</label>
-<textarea name="plates" rows="4" placeholder="901CX01 Иванов кв. 12&#10;724AJW02 Петров"></textarea>
-<p><button>Добавить</button></p></form></div>
-<div class="card"><h2>Белый список ({{items|length}})</h2>
-<table><tr><th>Номер</th><th>Владелец</th><th>Статус</th><th></th></tr>
-{% for w in items %}<tr><td class="plate">{{w.plate}}</td><td>{{w.owner}}</td>
-<td>{% if w.active %}<span class="ok">активен</span>{% else %}<span class="mut">выключен</span>{% endif %}</td>
-<td><form class="inline" method="post" action="/whitelist/{{w.id}}/toggle"><button class="sm sec">{{'выключить' if w.active else 'включить'}}</button></form>
-<form class="inline" method="post" action="/whitelist/{{w.id}}/delete" onsubmit="return confirm('Удалить {{w.plate}}?')"><button class="sm red">удалить</button></form></td></tr>
-{% else %}<tr><td colspan="4" class="mut">Список пуст</td></tr>{% endfor %}</table></div>
+{% extends "base.html" %}{% block title %}Белый список · Шлагбаум{% endblock %}
+{% block body %}
+<details class="card" {{'open' if not items}}><summary>➕ Добавить номера</summary>
+<form method="post" action="/whitelist/add" style="margin-top:10px">
+<textarea name="plates" rows="4" placeholder="901 CX 01 Иванов кв. 12&#10;724AJW02 Петров" autocapitalize="characters"></textarea>
+<p class="hint">По одному номеру в строке. После номера через пробел можно указать владельца. Пробелы в номере и русские буквы допустимы.</p>
+<p><button class="full-m">Добавить</button></p></form></details>
+
+<div class="card">
+<div class="row" style="margin-bottom:6px"><h2 style="margin:0">Номера ({{items|length}})</h2><span class="sp"></span>
+<input id="flt" placeholder="Поиск" style="max-width:220px" autocapitalize="characters"></div>
+<div class="list" id="wl">
+{% for w in items %}
+<div class="item" data-s="{{w.plate}} {{w.owner|lower}}">
+  <span class="plate" style="{{'opacity:.45' if not w.active}}">{{w.plate}}</span>
+  <form method="post" action="/whitelist/{{w.id}}/owner" class="row" style="flex:1;min-width:180px;flex-wrap:nowrap">
+    <input name="owner" value="{{w.owner}}" placeholder="владелец" style="padding:7px 10px">
+    <button class="sm sec" title="Сохранить">💾</button>
+  </form>
+  <div class="row">
+    <form class="inline" method="post" action="/whitelist/{{w.id}}/toggle"><button class="sm sec">{{'⏸ выкл' if w.active else '▶️ вкл'}}</button></form>
+    <form class="inline" method="post" action="/whitelist/{{w.id}}/delete" onsubmit="return confirm('Удалить {{w.plate}}?')"><button class="sm red">🗑</button></form>
+  </div>
+</div>
+{% else %}<div class="empty">Список пуст — добавьте номера выше</div>{% endfor %}
+</div></div>
 {% endblock %}
+{% block scripts %}<script>
+document.getElementById('flt').oninput = e => { const q = e.target.value.toUpperCase().replace(/\s/g,'');
+  document.querySelectorAll('#wl .item').forEach(i => i.style.display = i.dataset.s.toUpperCase().includes(q) ? '' : 'none'); };
+</script>{% endblock %}

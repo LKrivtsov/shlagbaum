@@ -200,9 +200,33 @@ def _ev(r):
     return d
 
 
-def events(limit=100):
+EVENT_FILTERS = {
+    "allowed": "allowed=1 AND plate IS NOT NULL",
+    "denied": "allowed=0 AND plate IS NOT NULL",
+    "unknown": "plate IS NULL AND details NOT LIKE '%\"role\": \"exit\"%' AND msg_type!='manual'",
+    "exit": "details LIKE '%\"role\": \"exit\"%'",
+    "manual": "msg_type='manual'",
+}
+
+
+def events(limit=100, flt="", q=""):
+    where, args = [], []
+    if flt in EVENT_FILTERS:
+        where.append(EVENT_FILTERS[flt])
+    if q:
+        where.append("plate LIKE ?")
+        args.append(f"%{q}%")
+    sql = "SELECT * FROM events" + (" WHERE " + " AND ".join(where) if where else "") + " ORDER BY id DESC LIMIT ?"
     with cursor() as c:
-        return [_ev(r) for r in c.execute("SELECT * FROM events ORDER BY id DESC LIMIT ?", (limit,)).fetchall()]
+        return [_ev(r) for r in c.execute(sql, (*args, limit)).fetchall()]
+
+
+def stats_today(since_ts):
+    with cursor() as c:
+        r = c.execute(
+            "SELECT COUNT(*) AS total, SUM(action IN ('open','open-manual')) AS opened, "
+            "SUM(allowed=0 AND plate IS NOT NULL) AS denied FROM events WHERE ts>=?", (since_ts,)).fetchone()
+    return {k: r[k] or 0 for k in ("total", "opened", "denied")}
 
 
 def event_get(eid):

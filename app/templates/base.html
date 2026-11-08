@@ -1,34 +1,83 @@
 <!doctype html>
-<html lang="ru"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>Plate Gate</title>
+<html lang="ru"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="theme-color" content="#111827">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<title>{% block title %}Шлагбаум{% endblock %}</title>
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🚧</text></svg>">
 <style>
-:root{--b:#2563eb;--g:#16a34a;--r:#dc2626;--m:#6b7280;--bg:#f5f6f8}
-*{box-sizing:border-box}body{font-family:system-ui,-apple-system,Segoe UI,Roboto,sans-serif;margin:0;background:var(--bg);color:#111}
-nav{background:#111827;padding:10px 16px;display:flex;gap:16px;flex-wrap:wrap;align-items:center}
-nav a{color:#d1d5db;text-decoration:none;font-size:15px}nav a.on{color:#fff;font-weight:600}nav b{color:#fff;margin-right:12px}
-main{max-width:1100px;margin:0 auto;padding:16px}
-.card{background:#fff;border-radius:10px;padding:16px;margin-bottom:16px;box-shadow:0 1px 2px #0001}
-h2{margin:0 0 12px;font-size:18px}table{width:100%;border-collapse:collapse;font-size:14px}
-td,th{padding:6px 8px;border-bottom:1px solid #eee;text-align:left;vertical-align:middle}
-input,select,textarea{padding:7px 9px;border:1px solid #d1d5db;border-radius:6px;font:inherit}
-textarea{width:100%}label{display:block;margin:8px 0 3px;font-size:13px;color:#374151}
-.grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(240px,1fr));gap:4px 16px}
-.grid input{width:100%}
-button{background:var(--b);color:#fff;border:0;border-radius:6px;padding:8px 14px;cursor:pointer;font:inherit}
-button.sec{background:#e5e7eb;color:#111}button.red{background:var(--r)}button.sm{padding:4px 9px;font-size:13px}
-form.inline{display:inline}.ok{color:var(--g);font-weight:600}.no{color:var(--r);font-weight:600}.mut{color:var(--m);font-size:13px}
-.flash{padding:10px 14px;border-radius:8px;margin-bottom:12px;background:#dcfce7;word-break:break-word}.flash.e{background:#fee2e2}
-.plate{font-family:ui-monospace,monospace;font-size:16px;font-weight:700;letter-spacing:1px}
-img.th{height:54px;border-radius:4px}code{background:#f3f4f6;padding:2px 5px;border-radius:4px;word-break:break-all}
-</style></head><body>
-<nav><b>🚧 Plate Gate</b>
-<a href="/" class="{{'on' if page=='dashboard'}}">События</a>
-<a href="/whitelist" class="{{'on' if page=='whitelist'}}">Белый список</a>
-<a href="/cameras" class="{{'on' if page=='cameras'}}">Камеры</a>
-<a href="/imou" class="{{'on' if page=='imou'}}">Imou / вебхук</a>
-<a href="/settings" class="{{'on' if page=='settings'}}">Настройки</a>
-</nav><main>
-{% if msg %}<div class="flash">{{msg}}</div>{% endif %}
-{% if err %}<div class="flash e">{{err}}</div>{% endif %}
+:root{--b:#2563eb;--bd:#1d4ed8;--g:#16a34a;--gl:#dcfce7;--r:#dc2626;--rl:#fee2e2;--y:#d97706;--yl:#fef3c7;--m:#6b7280;--bg:#f3f4f6;--card:#fff;--line:#e5e7eb;--rad:12px}
+*{box-sizing:border-box}
+html{-webkit-text-size-adjust:100%}
+body{font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;margin:0;background:var(--bg);color:#111;font-size:15px;line-height:1.4}
+a{color:var(--b)}
+header{position:sticky;top:0;z-index:10;background:#111827;padding-top:env(safe-area-inset-top)}
+.bar{max-width:1100px;margin:0 auto;display:flex;align-items:center;gap:4px;padding:0 8px;overflow-x:auto;scrollbar-width:none}
+.bar::-webkit-scrollbar{display:none}
+.bar .logo{color:#fff;font-weight:700;padding:12px 8px 12px 4px;white-space:nowrap;text-decoration:none}
+.bar a.tab{color:#9ca3af;text-decoration:none;padding:12px 10px;white-space:nowrap;border-bottom:3px solid transparent;font-size:15px}
+.bar a.tab.on{color:#fff;border-bottom-color:#60a5fa}
+main{max-width:1100px;margin:0 auto;padding:12px 12px calc(24px + env(safe-area-inset-bottom))}
+.card{background:var(--card);border-radius:var(--rad);padding:14px;margin-bottom:12px;box-shadow:0 1px 2px #0000000f}
+h1{font-size:20px;margin:4px 0 12px}h2{margin:0 0 10px;font-size:17px}
+.row{display:flex;gap:8px;flex-wrap:wrap;align-items:center}
+.sp{flex:1}
+label{display:block;margin:10px 0 4px;font-size:13px;color:#374151;font-weight:500}
+label.chk{display:flex;gap:10px;align-items:center;font-size:15px;font-weight:400;margin:10px 0;cursor:pointer}
+label.chk input{width:20px;height:20px;flex:none}
+input,select,textarea{padding:10px 12px;border:1px solid #d1d5db;border-radius:8px;font:inherit;font-size:16px;background:#fff;width:100%;max-width:100%}
+input[type=checkbox],input[type=file]{width:auto}
+input:focus,select:focus,textarea:focus{outline:2px solid #93c5fd;border-color:var(--b)}
+.grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(230px,1fr));gap:0 14px}
+.hint{color:var(--m);font-size:13px;margin:6px 0 0}
+button,.btn{display:inline-flex;align-items:center;justify-content:center;gap:6px;min-height:42px;background:var(--b);color:#fff;border:0;border-radius:8px;padding:9px 16px;cursor:pointer;font:inherit;font-weight:500;text-decoration:none;white-space:nowrap}
+button:hover,.btn:hover{background:var(--bd)}
+button.sec,.btn.sec{background:#e5e7eb;color:#111}button.sec:hover{background:#d1d5db}
+button.red{background:var(--r)}button.green{background:var(--g)}
+button.sm,.btn.sm{min-height:34px;padding:5px 11px;font-size:14px}
+button.big{min-height:52px;font-size:17px;padding:12px 22px}
+form.inline{display:inline}
+.flash{padding:12px 14px;border-radius:10px;margin-bottom:12px;background:var(--gl);word-break:break-word;display:flex;gap:8px;align-items:flex-start}
+.flash.e{background:var(--rl)}
+.flash .x{margin-left:auto;cursor:pointer;color:var(--m);background:none;border:0;min-height:auto;padding:0 4px;font-size:18px}
+.pill{display:inline-block;padding:2px 9px;border-radius:999px;font-size:12.5px;font-weight:600;white-space:nowrap}
+.pill.g{background:var(--gl);color:#166534}.pill.r{background:var(--rl);color:#991b1b}.pill.y{background:var(--yl);color:#92400e}.pill.n{background:#e5e7eb;color:#374151}.pill.b{background:#dbeafe;color:#1e40af}
+.plate{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-weight:700;letter-spacing:1px;border:2px solid #111;border-radius:6px;padding:1px 7px;background:#fff;display:inline-block;font-size:16px}
+.mut{color:var(--m);font-size:13px}
+code{background:#f3f4f6;padding:2px 5px;border-radius:4px;word-break:break-all;font-size:13px}
+pre{background:#f9fafb;border:1px solid var(--line);border-radius:8px;padding:8px;overflow-x:auto;font-size:12px;margin:6px 0;white-space:pre-wrap;word-break:break-all;max-height:220px}
+details>summary{cursor:pointer;font-weight:600;list-style:none;display:flex;align-items:center;gap:6px}
+details>summary::-webkit-details-marker{display:none}
+details>summary:before{content:"▸";color:var(--m)}details[open]>summary:before{content:"▾"}
+.list>.item{display:flex;gap:10px;align-items:center;padding:10px 0;border-bottom:1px solid var(--line);flex-wrap:wrap}
+.list>.item:last-child{border-bottom:0}
+.empty{text-align:center;color:var(--m);padding:28px 10px}
+@media (max-width:600px){
+  main{padding:10px 8px 24px}.card{padding:12px;border-radius:10px}
+  .grid{grid-template-columns:1fr}
+  .hide-m{display:none!important}
+  button.full-m{width:100%}
+}
+</style>{% block head %}{% endblock %}</head><body>
+<header><nav class="bar">
+<a class="logo" href="/">🚧 Шлагбаум</a>
+<a href="/" class="tab {{'on' if page in ('dashboard','event','recognize')}}">События</a>
+<a href="/whitelist" class="tab {{'on' if page=='whitelist'}}">Белый список</a>
+<a href="/cameras" class="tab {{'on' if page=='cameras'}}">Камеры</a>
+<a href="/settings" class="tab {{'on' if page=='settings'}}">Настройки</a>
+<a href="/imou" class="tab {{'on' if page=='imou'}}">Imou</a>
+</nav></header>
+<main>
+{% if msg %}<div class="flash"><span>✅ {{msg}}</span><button class="x" onclick="this.parentNode.remove()">×</button></div>{% endif %}
+{% if err %}<div class="flash e"><span>⚠️ {{err}}</span><button class="x" onclick="this.parentNode.remove()">×</button></div>{% endif %}
 {% block body %}{% endblock %}
-</main></body></html>
+</main>
+<script>
+document.querySelector('.bar a.tab.on')?.scrollIntoView({inline:'center',block:'nearest'});
+// убираем ?msg= из адреса, чтобы при обновлении страницы сообщение не повторялось
+if (location.search.match(/[?&](msg|err)=/)) { const u = new URL(location); u.searchParams.delete('msg'); u.searchParams.delete('err'); history.replaceState(null, '', u); }
+// защита от двойного нажатия
+document.addEventListener('submit', e => { const b = e.submitter; if (b && !e.defaultPrevented) setTimeout(() => { b.disabled = true; b.dataset.t = b.textContent; b.textContent = '⏳ ' + b.textContent; }, 0); });
+</script>
+{% block scripts %}{% endblock %}
+</body></html>

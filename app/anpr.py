@@ -70,13 +70,17 @@ class ANPR:
         self._lock = threading.Lock()  # одна инференс-сессия за раз — экономим CPU и RAM
         log.info("ANPR ready: %s + %s, threads=%s", config.DETECTOR_MODEL, config.OCR_MODEL, config.ANPR_THREADS)
 
-    def recognize(self, img: np.ndarray) -> list[PlateResult]:
+    def recognize(self, img: np.ndarray, with_stats=False):
+        """Список номеров. with_stats=True — ещё и (кол-во найденных рамок номеров, макс. уверенность детектора):
+        по ним видно, есть ли в кадре машина, даже если номер не прочитался."""
         if img is None or img.size == 0:
-            return []
+            return ([], 0, 0.0) if with_stats else []
         h, w = img.shape[:2]
         results = []
         with self._lock:
             dets = self.detector.predict(img)
+            n_dets = len(dets)
+            max_det = max((float(d.confidence) for d in dets), default=0.0)
             for d in dets:
                 b = d.bounding_box
                 # небольшой запас вокруг рамки помогает OCR
@@ -96,7 +100,7 @@ class ANPR:
                     PlateResult(plate, conf, float(d.confidence), (x1, y1, x2, y2), is_kz(plate), probs)
                 )
         results.sort(key=lambda r: r.score, reverse=True)
-        return results
+        return (results, n_dets, max_det) if with_stats else results
 
 
 def annotate(img: np.ndarray, results: list[PlateResult]) -> np.ndarray:

@@ -1,26 +1,50 @@
-{% extends "base.html" %}{% block body %}
-<div class="card"><h2>Камеры</h2>
-<p class="mut">События обрабатываются только с камер из этого списка. <b>Въезд</b>: делаются снимки, распознаётся номер, шлагбаум открывается только для номеров из белого списка. <b>Выезд</b>: шлагбаум открывается сразу по событию, без распознавания. Для журнала делается один кадр.</p>
-<table><tr><th>Название</th><th>Device ID / канал</th><th>Роль</th><th>RTSP</th><th>Статус</th><th></th></tr>
-{% for c in cameras %}<tr><td>{{c.name}}</td><td><code>{{c.device_id}}</code> / {{c.channel_id}}</td>
-<td><form method="post" action="/cameras/{{c.id}}/role"><select name="role" onchange="this.form.submit()">
-<option value="entry" {{'selected' if c.role != 'exit'}}>Въезд — распознавать номер</option>
-<option value="exit" {{'selected' if c.role == 'exit'}}>Выезд — открывать сразу</option></select></form></td>
-<td class="mut">{{'да' if c.rtsp_url else 'нет (снимок через облако)'}}</td>
-<td>{% if c.active %}<span class="ok">вкл</span>{% else %}<span class="mut">выкл</span>{% endif %}</td>
-<td><form class="inline" method="post" action="/cameras/{{c.id}}/test"><button class="sm">{{'снимок' if c.role == 'exit' else 'снимок + распознать'}}</button></form>
-<form class="inline" method="post" action="/cameras/{{c.id}}/test" onsubmit="return confirm('Выполнить как настоящее событие (с открытием шлагбаума)?')"><input type="hidden" name="open_gate" value="1"><button class="sm sec">+ открыть</button></form>
-<form class="inline" method="post" action="/cameras/{{c.id}}/toggle"><button class="sm sec">{{'выкл' if c.active else 'вкл'}}</button></form>
-<form class="inline" method="post" action="/cameras/{{c.id}}/delete" onsubmit="return confirm('Удалить камеру?')"><button class="sm red">×</button></form></td></tr>
-{% else %}<tr><td colspan="6" class="mut">Камер нет — импортируйте из Imou или добавьте вручную</td></tr>{% endfor %}</table>
-<form method="post" action="/cameras/import" style="margin-top:12px"><button>Импортировать камеры из аккаунта Imou</button></form></div>
-<div class="card"><h2>Добавить вручную</h2>
+{% extends "base.html" %}{% block title %}Камеры · Шлагбаум{% endblock %}
+{% block head %}<style>
+.cams{display:grid;grid-template-columns:repeat(auto-fill,minmax(320px,1fr));gap:12px}
+@media (max-width:600px){.cams{grid-template-columns:1fr}}
+</style>{% endblock %}
+{% block body %}
+<div class="card"><p class="hint" style="margin:0">События обрабатываются только с камер из этого списка.<br>
+<b>Въезд</b>: снимки, распознавание номера, открытие только для белого списка.<br>
+<b>Выезд</b>: шлагбаум открывается сразу по событию, без распознавания.</p></div>
+
+<div class="cams">
+{% for c in cameras %}
+<div class="card" style="margin:0;{{'opacity:.6' if not c.active}}">
+  <div class="row" style="margin-bottom:4px">
+    <h2 style="margin:0">{{c.name or c.device_id}}</h2>
+    <span class="pill {{'b' if c.role == 'exit' else 'g'}}">{{'⬅️ выезд' if c.role == 'exit' else '➡️ въезд'}}</span>
+    {% if not c.active %}<span class="pill n">выключена</span>{% endif %}
+  </div>
+  <div class="mut">{{c.device_id}} · канал {{c.channel_id}} · {{'RTSP' if c.rtsp_url else 'снимки через облако'}}</div>
+  <div class="row" style="margin-top:10px">
+    <form class="inline" method="post" action="/cameras/{{c.id}}/test"><button class="sm">📸 {{'Снимок' if c.role == 'exit' else 'Проверить'}}</button></form>
+    <form class="inline" method="post" action="/cameras/{{c.id}}/test" onsubmit="return confirm('Выполнить как настоящее событие (с открытием шлагбаума)?')"><input type="hidden" name="open_gate" value="1"><button class="sm sec">▶️ Как событие</button></form>
+    <form class="inline" method="post" action="/cameras/{{c.id}}/toggle"><button class="sm sec">{{'⏸ Выкл' if c.active else '▶️ Вкл'}}</button></form>
+  </div>
+  <details style="margin-top:10px"><summary>Изменить</summary>
+  <form method="post" action="/cameras/{{c.id}}/edit">
+    <label>Название</label><input name="name" value="{{c.name}}">
+    <label>Роль</label><select name="role">
+      <option value="entry" {{'selected' if c.role != 'exit'}}>Въезд — распознавать номер</option>
+      <option value="exit" {{'selected' if c.role == 'exit'}}>Выезд — открывать сразу</option></select>
+    <label>RTSP (необязательно)</label><input name="rtsp_url" value="{{c.rtsp_url}}" placeholder="rtsp://...">
+    <div class="row" style="margin-top:10px"><button>Сохранить</button><span class="sp"></span>
+    <button class="red sm" formaction="/cameras/{{c.id}}/delete" onclick="return confirm('Удалить камеру?')">Удалить</button></div>
+  </form></details>
+</div>
+{% else %}<div class="card empty">Камер нет — импортируйте из Imou или добавьте вручную</div>{% endfor %}
+</div>
+
+<div class="card" style="margin-top:12px">
+<form method="post" action="/cameras/import"><button class="full-m">⬇️ Импортировать камеры из аккаунта Imou</button></form>
+<details style="margin-top:12px"><summary>Добавить вручную</summary>
 <form method="post" action="/cameras/add"><div class="grid">
-<div><label>Device ID (серийный номер)</label><input name="device_id" required></div>
-<div><label>Канал</label><input name="channel_id" value="0"></div>
+<div><label>Device ID (серийный номер)</label><input name="device_id" required autocapitalize="characters"></div>
+<div><label>Канал</label><input name="channel_id" value="0" inputmode="numeric"></div>
 <div><label>Название</label><input name="name" placeholder="Въезд"></div>
-<div><label>Роль</label><select name="role" style="width:100%"><option value="entry">Въезд — распознавать</option><option value="exit">Выезд — открывать сразу</option></select></div>
-<div><label>RTSP (необязательно)</label><input name="rtsp_url" placeholder="rtsp://admin:pass@ip:554/cam/realmonitor?channel=1&subtype=0"></div>
-</div><p class="mut">RTSP нужен, только если VPS может достучаться до камеры напрямую (VPN/проброс порта). Так кадр приходит быстрее, чем через облако Imou.</p>
-<button>Сохранить</button></form></div>
+<div><label>Роль</label><select name="role"><option value="entry">Въезд — распознавать</option><option value="exit">Выезд — открывать сразу</option></select></div>
+<div><label>RTSP (необязательно)</label><input name="rtsp_url" placeholder="rtsp://admin:pass@ip:554/..."></div>
+</div><p class="hint">RTSP нужен, только если сервер может подключиться к камере напрямую (VPN или проброс порта). Тогда кадр приходит быстрее, чем через облако Imou.</p>
+<p><button class="full-m">Сохранить</button></p></form></details></div>
 {% endblock %}

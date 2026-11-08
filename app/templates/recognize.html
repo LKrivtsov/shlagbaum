@@ -1,9 +1,11 @@
 {% extends "base.html" %}{% block body %}
-<div class="card"><h2>Результат ({{'%.0f'|format(elapsed*1000)}} мс)</h2>
-<table><tr><th>Номер</th><th>Уверенность</th><th>Формат РК</th><th>В белом списке</th></tr>
-{% for r in results %}<tr><td class="plate">{{r.plate}}</td><td>{{'%.1f%%'|format(r.conf*100)}}</td>
-<td>{{'да' if r.kz else 'нет'}}</td><td>{% if r.wl %}<span class="ok">да</span>{% else %}<span class="no">нет</span>{% endif %}</td></tr>
-{% else %}<tr><td colspan="4" class="mut">Номер не найден</td></tr>{% endfor %}</table>
-<p><img src="data:image/jpeg;base64,{{image}}" style="max-width:100%;border-radius:8px"></p>
-<a href="/">← назад</a></div>
+<p><a href="/">← к событиям</a></p>
+<div class="card"><h2>Результат · {{'%.0f'|format(elapsed*1000)}} мс</h2>
+<div class="list">
+{% for r in results %}<div class="item"><span class="plate">{{r.plate}}</span>
+<span class="mut">{{'%.1f%%'|format(r.conf*100)}}</span>
+{% if not r.kz %}<span class="pill y">не формат РК</span>{% endif %}
+{% if r.wl %}<span class="pill g">в белом списке</span>{% else %}<span class="pill r">нет в списке</span>{% endif %}</div>
+{% else %}<div class="empty">Номер не найден</div>{% endfor %}</div>
+<img src="data:image/jpeg;base64,{{image}}" style="max-width:100%;border-radius:8px;margin-top:10px" alt=""></div>
 {% endblock %}
