@@ -54,7 +54,8 @@
 {% for f in e.frames %}
 <div class="fr {{'cover' if f.cover}}">
   {% if f.file %}<img src="/snap/{{f.file}}" loading="lazy" onclick="lb(this.src)" alt="">{% else %}<div class="empty">Кадр не получен</div>{% endif %}
-  <div class="cap">{% if f.cover %}<b style="color:var(--text)">Обложка</b> · {% endif %}{{f.note}}</div>
+  <div class="cap">{% if f.cover %}<b style="color:var(--text)">Обложка</b> · {% endif %}{{f.note}}
+  {% if f.file %} · <a href="/snap/{{f.file|replace('.jpg', '_raw.jpg')}}" download>оригинал</a>{% endif %}</div>
 </div>
 {% else %}<div class="card empty">Фото нет</div>{% endfor %}
 </div>

@@ -331,6 +331,9 @@ async def recognize_bytes(data: bytes):
 
 
 def _save_frame(img, results, cam, note) -> tuple[str, bytes]:
+    fname = f"{datetime.now(config.TZ):%Y%m%d_%H%M%S}_{cam['id']}_{uuid.uuid4().hex[:6]}.jpg"
+    # оригинал без разметки — для разбора ошибок распознавания и пополнения тестов
+    cv2.imwrite(str(config.SNAP_DIR / fname.replace(".jpg", "_raw.jpg")), img, [cv2.IMWRITE_JPEG_QUALITY, 92])
     ann = anpr.annotate(img, results)
     h, w = ann.shape[:2]
     # сохраняем крупно, чтобы номер было видно; превью делает браузер
@@ -339,7 +342,6 @@ def _save_frame(img, results, cam, note) -> tuple[str, bytes]:
     cv2.putText(ann, note, (12, 36), cv2.FONT_HERSHEY_SIMPLEX, 1.0, (0, 0, 0), 5)
     cv2.putText(ann, note, (12, 36), cv2.FONT_HERSHEY_SIMPLEX, 1.0, (255, 255, 255), 2)
     jpg = cv2.imencode(".jpg", ann, [cv2.IMWRITE_JPEG_QUALITY, 85])[1].tobytes()
-    fname = f"{datetime.now(config.TZ):%Y%m%d_%H%M%S}_{cam['id']}_{uuid.uuid4().hex[:6]}.jpg"
     (config.SNAP_DIR / fname).write_bytes(jpg)
     return fname, jpg
 

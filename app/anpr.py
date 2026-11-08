@@ -21,12 +21,21 @@ log = logging.getLogger("anpr")
 KZ_PATTERNS = [
     re.compile(r"^\d{3}[A-Z]{2,3}\d{2}$"),   # 901CX01, 724AJW02 (с 2012 г.)
     re.compile(r"^[A-Z]\d{3}[A-Z]{2,3}$"),   # старый образец A123BCD
-    re.compile(r"^\d{2}[A-Z]{2}\d{3}$"),     # мото/прицепы и др.
-    re.compile(r"^\d{3}[A-Z]{2}\d{3}$"),
 ]
 
 # Кириллица -> латиница (для ввода номеров в белый список с русской раскладкой)
 _CYR = str.maketrans("АВЕКМНОРСТУХІ", "ABEKMHOPCTYXI")
+
+
+# Коды регионов РК (01 Астана … 20 Улытау)
+KZ_REGIONS = [f"{i:02d}" for i in range(1, 21)]
+
+
+def region_ok(plate: str) -> bool:
+    """Для новых номеров (901CX01) проверяем, что регион существует."""
+    if re.match(r"^\d{3}[A-Z]{2,3}\d{2}$", plate):
+        return plate[-2:] in KZ_REGIONS
+    return True
 
 
 def normalize(plate: str) -> str:
@@ -35,7 +44,7 @@ def normalize(plate: str) -> str:
 
 
 def is_kz(plate: str) -> bool:
-    return any(p.match(plate) for p in KZ_PATTERNS)
+    return any(p.match(plate) for p in KZ_PATTERNS) and region_ok(plate)
 
 
 @dataclass
@@ -97,8 +106,20 @@ class ANPR:
         best = None
         for t in templates:
             txt, probs, logp = "", [], 0.0
+            rpos = t.find("RR")
+            reg = None
+            if rpos >= 0:   # регион выбираем целиком из списка существующих
+                def rp(code):
+                    a, b2 = self.alphabet.index(code[0]), self.alphabet.index(code[1])
+                    return P[rpos, a] * P[rpos + 1, b2]
+                reg = max(KZ_REGIONS, key=rp)
             for i in range(self.slots):
-                if i < len(t):
+                if reg is not None and i in (rpos, rpos + 1):
+                    j = self.alphabet.index(reg[i - rpos])
+                    txt += reg[i - rpos]
+                    probs.append(float(P[i, j] / (P[i, self._dig].sum() + 1e-9)))
+                    logp += float(np.log(P[i, j] + 1e-9))
+                elif i < len(t):
                     cand = self._dig if t[i] == "D" else self._let
                     j = max(cand, key=lambda k: P[i, k])
                     txt += self.alphabet[j]
@@ -111,36 +132,67 @@ class ANPR:
                 best = (txt, probs, logp)
         return best[0], best[1]
 
-    def _read(self, crop, w, h):
-        """Читает номер на вырезанной рамке. Возвращает (номер, уверенность, вероятности, квадратный?)."""
-        if w / max(h, 1) < SQUARE_MAX_ASPECT:
-            # Квадратный номер РК: сверху «KZ/флаг + 3 цифры», снизу «регион + 2–3 буквы».
-            # Режем на две строки и читаем каждую отдельно.
-            H, W = crop.shape[:2]
-            top = crop[: int(H * 0.52), int(W * 0.28):]   # без флага и «KZ»
-            bot = crop[int(H * 0.48):]
-            P = self._probs([top, bot])
-            t_txt, t_p = self._decode_tmpl(P[0], SQUARE_TOP)
-            b_txt, b_p = self._decode_tmpl(P[1], SQUARE_BOTTOM)
-            plate = t_txt + b_txt[2:] + b_txt[:2]   # 172 + BUR + 02
-            probs = t_p + b_p[2:] + b_p[:2]
-            return plate, float(np.mean(probs)), probs, True
-        P = self._probs([crop])[0]
-        free, fp = self._decode_free(P)
-        free = normalize(free)
-        if is_kz(free) or not free:
-            if len(free) < 4:
-                return None
-            return free, float(np.mean(fp)) if fp else 0.0, fp, False
-        # не похоже на формат РК — пробуем прочитать под шаблоны РК
-        kz, kp = self._decode_tmpl(P, KZ_TEMPLATES)
-        kconf = float(np.mean(kp))
-        fconf = float(np.mean(fp)) if fp else 0.0
-        if kconf >= fconf - 0.15:
-            return kz, kconf, kp, False
-        if len(free) < 4:
+    def _read(self, img, b):
+        """Читает номер в рамке детектора b. Возвращает (номер, уверенность, вероятности, квадратный?, рамка).
+
+        Детектор часто даёт рамку впритык или обрезает край (особенно на номерах под углом —
+        отсекается регион «02» справа). Поэтому читаем несколько вырезок с разным запасом
+        и выбираем результат голосованием, отдавая предпочтение формату РК."""
+        H, W = img.shape[:2]
+        bw, bh = b.x2 - b.x1, b.y2 - b.y1
+        if bw < 15 or bh < 8:
             return None
-        return free, fconf, fp, False
+        crops, boxes = [], []
+        for px, py in CROP_PADS:
+            x1, y1 = max(0, b.x1 - int(bw * px)), max(0, b.y1 - int(bh * py))
+            x2, y2 = min(W, b.x2 + int(bw * px)), min(H, b.y2 + int(bh * py))
+            crops.append(img[y1:y2, x1:x2])
+            boxes.append((x1, y1, x2, y2))
+        square_like = bw / max(bh, 1) < SQUARE_MAX_ASPECT
+        tops_bots = []
+        if square_like:
+            # Квадратный номер РК: сверху «флаг/KZ + 3 цифры», снизу «регион + 2–3 буквы».
+            for c in crops[:2]:
+                ch, cw = c.shape[:2]
+                tops_bots += [c[: int(ch * 0.52), int(cw * 0.28):], c[int(ch * 0.48):]]
+        P = self._probs(crops + tops_bots)
+
+        cands = []   # (номер, уверенность, вероятности, квадратный, рамка)
+        for i, box in enumerate(boxes):
+            free, fp = self._decode_free(P[i])
+            free = normalize(free)
+            fconf = float(np.mean(fp)) if fp else 0.0
+            m = SQUARE_AS_ROW.match(free)
+            if m:   # квадратный номер, прочитанный в одну строку: 172 02BUR -> 172BUR02
+                cands.append((m.group(1) + m.group(3) + m.group(2), fconf, fp, True, box))
+            elif is_kz(free):
+                cands.append((free, fconf, fp, False, box))
+            else:
+                kz, kp = self._decode_tmpl(P[i], KZ_TEMPLATES)
+                cands.append((kz, float(np.mean(kp)) * 0.95, kp, False, box))
+                if len(free) >= 4:
+                    cands.append((free, fconf * 0.9, fp, False, box))
+        # Ансамбль: усредняем вероятности по всем вырезкам и читаем по шаблонам РК.
+        # Шумные символы (мелкий регион «02») так читаются надёжнее, чем в любой одной вырезке.
+        Pavg = P[: len(crops)].mean(axis=0)
+        kz, kp = self._decode_tmpl(Pavg, KZ_TEMPLATES)
+        cands.append((kz, float(np.mean(kp)), kp, False, boxes[1]))
+        cands.append((kz, float(np.mean(kp)), kp, False, boxes[1]))   # двойной вес в голосовании
+        for j in range(0, len(tops_bots), 2):
+            k = len(crops) + j
+            t_txt, t_p = self._decode_tmpl(P[k], SQUARE_TOP)
+            b_txt, b_p = self._decode_tmpl(P[k + 1], SQUARE_BOTTOM)
+            probs = t_p + b_p[2:] + b_p[:2]
+            cands.append((t_txt + b_txt[2:] + b_txt[:2], float(np.mean(probs)), probs, True, boxes[j // 2]))
+        if not cands:
+            return None
+        # голосование: суммарная уверенность одинаковых прочтений, формат РК в приоритете
+        votes = {}
+        for c in cands:
+            votes[c[0]] = votes.get(c[0], 0.0) + c[1] * (1.0 if is_kz(c[0]) else 0.6)
+        win = max(votes, key=votes.get)
+        best = max((c for c in cands if c[0] == win), key=lambda c: c[1])
+        return best
 
     def recognize(self, img: np.ndarray, with_stats=False):
         """Список номеров. with_stats=True — ещё и (кол-во найденных рамок номеров, макс. уверенность детектора):
@@ -154,28 +206,24 @@ class ANPR:
             n_dets = len(dets)
             max_det = max((float(d.confidence) for d in dets), default=0.0)
             for d in dets:
-                b = d.bounding_box
-                # небольшой запас вокруг рамки помогает OCR
-                px, py = int((b.x2 - b.x1) * 0.04), int((b.y2 - b.y1) * 0.08)
-                x1, y1 = max(0, b.x1 - px), max(0, b.y1 - py)
-                x2, y2 = min(w, b.x2 + px), min(h, b.y2 + py)
-                crop = img[y1:y2, x1:x2]
-                if crop.size == 0 or (x2 - x1) < 20:
+                r = self._read(img, d.bounding_box)
+                if r is None or len(r[0]) < 4:
                     continue
-                r = self._read(crop, x2 - x1, y2 - y1)
-                if r is None:
-                    continue
-                plate, conf, probs, square = r
-                results.append(PlateResult(plate, conf, float(d.confidence), (x1, y1, x2, y2), is_kz(plate), probs,
-                                           square))
+                plate, conf, probs, square, box = r
+                results.append(PlateResult(plate, conf, float(d.confidence), box, is_kz(plate), probs, square))
         results.sort(key=lambda r: r.score, reverse=True)
         return (results, n_dets, max_det) if with_stats else results
 
 
 # Шаблоны номеров РК: D — цифра, L — буква
-KZ_TEMPLATES = ["DDDLLDD", "DDDLLLDD", "LDDDLL", "LDDDLLL"]
+# D — цифра, L — буква, RR — код региона из списка
+KZ_TEMPLATES = ["DDDLLRR", "DDDLLLRR", "LDDDLL", "LDDDLLL"]
 SQUARE_TOP = ["DDD"]
-SQUARE_BOTTOM = ["DDLL", "DDLLL"]
+SQUARE_BOTTOM = ["RRLL", "RRLLL"]
+# запас вокруг рамки детектора (доля ширины, доля высоты) — читаем все варианты
+CROP_PADS = [(0.04, 0.08), (0.12, 0.15), (0.2, 0.2), (0.3, 0.25)]
+# квадратный номер, прочитанный в одну строку: «172» + «02BUR»
+SQUARE_AS_ROW = re.compile(r"^(\d{3})(\d{2})([A-Z]{2,3})$")
 SQUARE_MAX_ASPECT = 1.6   # ширина/высота рамки: однострочный номер РК обычно 2.3–4.5, квадратный ~0.9–1.2
 
 

@@ -282,5 +282,6 @@ def cleanup(keep_days):
         for f in set(files):
             try:
                 (config.SNAP_DIR / f).unlink(missing_ok=True)
+                (config.SNAP_DIR / f.replace(".jpg", "_raw.jpg")).unlink(missing_ok=True)
             except Exception:
                 pass
