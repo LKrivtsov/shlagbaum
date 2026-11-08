@@ -1,0 +1,13 @@
+{% extends "base.html" %}{% block body %}{% set d = e.details|fromjson %}
+<div class="card"><h2>Событие #{{e.id}} · {{e.ts|dt}}</h2>
+<p>{% if d.role == 'exit' %}<b>Выезд</b>{% else %}Номер: <span class="plate">{{e.plate or '—'}}</span>
+{% if e.confidence %}({{'%.0f%%'|format(e.confidence*100)}}){% endif %}
+{% if e.allowed %}<span class="ok">в белом списке</span>{% elif e.plate %}<span class="no">нет в списке</span>{% endif %}{% endif %}
+· действие: <b>{{e.action}}</b> {{d.info}} · {{d.elapsed}} с</p>
+<p class="mut">Камера {{e.device_id}}/{{e.channel_id}} · {{e.msg_type}}{% if e.label_type %} · labelType={{e.label_type}}{% endif %}</p>
+<a href="/">← к событиям</a></div>
+{% for f in e.frames %}<div class="card"><h2 style="font-size:15px">{{f.note}}</h2>
+{% if f.file %}<a href="/snap/{{f.file}}" target="_blank"><img src="/snap/{{f.file}}" style="max-width:100%;border-radius:8px"></a>
+{% else %}<span class="mut">кадр не получен</span>{% endif %}</div>
+{% else %}<div class="card mut">Фото нет</div>{% endfor %}
+{% endblock %}

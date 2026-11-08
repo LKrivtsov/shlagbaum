@@ -6,12 +6,13 @@
 <table><tr><th>Время</th><th>Снимок</th><th>Номер</th><th>Уверенн.</th><th>Доступ</th><th>Действие</th><th>Камера / событие</th></tr>
 {% for e in events %}{% set d = e.details|fromjson %}
 <tr><td>{{e.ts|dt}}</td>
-<td>{% if e.image %}<a href="/snap/{{e.image}}" target="_blank"><img class="th" src="/snap/{{e.image}}"></a>{% endif %}</td>
-<td class="plate">{{e.plate or '—'}}{% if d.owner %}<div class="mut">{{d.owner}}</div>{% endif %}</td>
+<td style="white-space:nowrap"><a href="/event/{{e.id}}">{% for f in e.frames %}{% if f.file %}<img class="th" src="/snap/{{f.file}}" title="{{f.note}}"> {% endif %}{% endfor %}</a>
+<div class="mut"><a href="/event/{{e.id}}">все фото ({{e.frames|length}})</a></div></td>
+<td class="plate">{% if d.role == 'exit' %}<span class="mut">выезд</span>{% else %}{{e.plate or '—'}}{% endif %}{% if d.owner %}<div class="mut">{{d.owner}}</div>{% endif %}</td>
 <td>{{ '%.0f%%'|format(e.confidence*100) if e.confidence else '' }}</td>
-<td>{% if e.allowed %}<span class="ok">разрешён</span>{% elif e.plate %}<span class="no">нет в списке</span>{% endif %}</td>
+<td>{% if d.role == 'exit' %}<span class="ok">выезд</span>{% elif e.allowed %}<span class="ok">разрешён</span>{% elif e.plate %}<span class="no">нет в списке</span>{% endif %}</td>
 <td>{{e.action}}<div class="mut">{{d.info}} {% if d.elapsed %}· {{d.elapsed}} с{% endif %}</div></td>
-<td class="mut">{{e.device_id}}/{{e.channel_id}}<br>{{e.msg_type}}</td></tr>
+<td class="mut">{{e.device_id}}/{{e.channel_id}}<br>{{e.msg_type}}{% if e.label_type %} · {{e.label_type}}{% endif %}</td></tr>
 {% else %}<tr><td colspan="7" class="mut">Событий пока нет</td></tr>{% endfor %}
 </table></div>
 {% endblock %}

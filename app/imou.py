@@ -36,6 +36,7 @@ class Imou:
         self.host = (host or config.IMOU_API_HOST).rstrip("/")
         self._token = None
         self._token_exp = 0
+        self._hls = {}
         self.client = httpx.AsyncClient(timeout=20)
 
     async def call(self, method: str, params: dict | None = None, with_token=True, _retry=True):
@@ -114,6 +115,32 @@ class Imou:
             log.warning("setDeviceSnapEnhanced failed (%s), fallback to setDeviceSnap", e)
             data = await self.call("setDeviceSnap", {"deviceId": device_id, "channelId": str(channel_id)})
         return data["url"]
+
+    async def hls_url(self, device_id: str, channel_id: str) -> str:
+        """HLS-адрес HD-потока (streamId=0). Привязываем трансляцию, если её ещё нет."""
+        key = (device_id, str(channel_id))
+        cached = self._hls.get(key)
+        if cached and time.time() - cached[1] < 3600:
+            return cached[0]
+        params = {"deviceId": device_id, "channelId": str(channel_id)}
+        streams = []
+        try:
+            data = await self.call("bindDeviceLive", {**params, "streamId": 0})
+            streams = data.get("streams") or []
+        except ImouError as e:
+            log.info("bindDeviceLive: %s — пробуем getLiveStreamInfo", e)
+        if not streams:
+            data = await self.call("getLiveStreamInfo", params)
+            streams = data.get("streams") or []
+        hd = [s for s in streams if str(s.get("streamId")) == "0"] or streams
+        if not hd:
+            raise ImouError("LIVE", "нет HLS-потока")
+        urls = [s.get("hls") for s in hd if s.get("hls")]
+        url = next((u for u in urls if u.startswith("https")), urls[0] if urls else None)
+        if not url:
+            raise ImouError("LIVE", "нет HLS-адреса")
+        self._hls[key] = (url, time.time())
+        return url
 
     async def download(self, url: str) -> bytes:
         r = await self.client.get(url, follow_redirects=True)

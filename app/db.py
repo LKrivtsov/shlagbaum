@@ -1,3 +1,4 @@
+import json
 import sqlite3
 import threading
 import time
@@ -71,6 +72,19 @@ def init():
             );
             """
         )
+        # миграции
+        cols = {r["name"] for r in c.execute("PRAGMA table_info(cameras)").fetchall()}
+        if "role" not in cols:
+            c.execute("ALTER TABLE cameras ADD COLUMN role TEXT NOT NULL DEFAULT 'entry'")
+        cols = {r["name"] for r in c.execute("PRAGMA table_info(events)").fetchall()}
+        if "images" not in cols:
+            c.execute("ALTER TABLE events ADD COLUMN images TEXT")
+        if "label_type" not in cols:
+            c.execute("ALTER TABLE events ADD COLUMN label_type TEXT")
+        old = c.execute("SELECT value FROM settings WHERE key='trigger_msg_types'").fetchone()
+        if old and old["value"].startswith("aiVehDetect,aiVehLine,aiVehArea,detection.vehicle.detected"):
+            # старый фильтр по msgType заменён фильтром labelType=carAlarm
+            c.execute("UPDATE settings SET value='' WHERE key='trigger_msg_types'")
         for k, v in config.DEFAULT_SETTINGS.items():
             c.execute("INSERT OR IGNORE INTO settings(key, value) VALUES (?, ?)", (k, v))
 
@@ -141,13 +155,19 @@ def camera_find(device_id, channel_id):
     return dict(r) if r else None
 
 
-def camera_upsert(device_id, channel_id, name="", rtsp_url=""):
+def camera_upsert(device_id, channel_id, name="", rtsp_url="", role=None):
     with cursor() as c:
         c.execute(
-            "INSERT INTO cameras(device_id, channel_id, name, rtsp_url) VALUES (?,?,?,?) "
-            "ON CONFLICT(device_id, channel_id) DO UPDATE SET name=excluded.name, rtsp_url=excluded.rtsp_url",
-            (device_id, str(channel_id), name, rtsp_url),
+            "INSERT INTO cameras(device_id, channel_id, name, rtsp_url, role) VALUES (?,?,?,?,?) "
+            "ON CONFLICT(device_id, channel_id) DO UPDATE SET name=excluded.name, rtsp_url=excluded.rtsp_url"
+            + (", role=excluded.role" if role else ""),
+            (device_id, str(channel_id), name, rtsp_url, role or "entry"),
         )
+
+
+def camera_set_role(cid, role):
+    with cursor() as c:
+        c.execute("UPDATE cameras SET role=? WHERE id=?", (role, cid))
 
 
 def camera_delete(cid):
@@ -169,9 +189,33 @@ def event_add(**kw):
         return c.lastrowid
 
 
+def _ev(r):
+    d = dict(r)
+    try:
+        d["frames"] = json.loads(d.get("images") or "[]")
+    except Exception:
+        d["frames"] = []
+    if not d["frames"] and d.get("image"):
+        d["frames"] = [{"file": d["image"], "note": ""}]
+    return d
+
+
 def events(limit=100):
     with cursor() as c:
-        return [dict(r) for r in c.execute("SELECT * FROM events ORDER BY id DESC LIMIT ?", (limit,)).fetchall()]
+        return [_ev(r) for r in c.execute("SELECT * FROM events ORDER BY id DESC LIMIT ?", (limit,)).fetchall()]
+
+
+def event_get(eid):
+    with cursor() as c:
+        r = c.execute("SELECT * FROM events WHERE id=?", (eid,)).fetchone()
+    return _ev(r) if r else None
+
+
+def last_action_ts(device_id, channel_id, action):
+    with cursor() as c:
+        r = c.execute("SELECT MAX(ts) AS t FROM events WHERE device_id=? AND channel_id=? AND action=?",
+                      (device_id, str(channel_id), action)).fetchone()
+    return r["t"] if r and r["t"] else 0
 
 
 def raw_add(body: str):
@@ -188,7 +232,7 @@ def raw_list(limit=30):
 def last_allowed_ts(plate):
     with cursor() as c:
         r = c.execute(
-            "SELECT MAX(ts) AS t FROM events WHERE plate=? AND allowed=1 AND action LIKE 'open%'", (plate,)
+            "SELECT MAX(ts) AS t FROM events WHERE plate=? AND allowed=1 AND action='open'", (plate,)
         ).fetchone()
     return r["t"] if r and r["t"] else 0
 
@@ -196,11 +240,18 @@ def last_allowed_ts(plate):
 def cleanup(keep_days):
     cutoff = time.time() - keep_days * 86400
     with cursor() as c:
-        rows = c.execute("SELECT image FROM events WHERE ts < ? AND image IS NOT NULL", (cutoff,)).fetchall()
-        c.execute("UPDATE events SET image=NULL WHERE ts < ?", (cutoff,))
+        rows = c.execute("SELECT image, images FROM events WHERE ts < ? AND (image IS NOT NULL OR images IS NOT NULL)",
+                         (cutoff,)).fetchall()
+        c.execute("UPDATE events SET image=NULL, images=NULL WHERE ts < ?", (cutoff,))
         c.execute("DELETE FROM events WHERE ts < ?", (cutoff - 90 * 86400,))
     for r in rows:
+        files = [r["image"]] if r["image"] else []
         try:
-            (config.SNAP_DIR / r["image"]).unlink(missing_ok=True)
+            files += [f["file"] for f in json.loads(r["images"] or "[]")]
         except Exception:
             pass
+        for f in set(files):
+            try:
+                (config.SNAP_DIR / f).unlink(missing_ok=True)
+            except Exception:
+                pass

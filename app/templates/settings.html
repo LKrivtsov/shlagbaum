@@ -2,8 +2,17 @@
 {% macro chk(k, title) %}<label><input type="checkbox" name="{{k}}" value="1" {{'checked' if s[k]=='1'}}> {{title}}</label>{% endmacro %}
 <div class="card"><h2>Распознавание и доступ</h2>
 <form method="post" action="/settings"><input type="hidden" name="_section" value="rec">
-<label>Типы событий, запускающие распознавание (msgType через запятую, пусто = любые)</label>
+<label>Обрабатывать события с labelType (через запятую, пусто = любые)</label>
+<input name="trigger_label_types" value="{{s.trigger_label_types}}" style="width:100%">
+<label>Дополнительно: только эти msgType (через запятую, пусто = любые)</label>
 <input name="trigger_msg_types" value="{{s.trigger_msg_types}}" style="width:100%">
+<label>Источник кадра для распознавания</label>
+<select name="image_source">
+<option value="snapshot" {{'selected' if s.image_source=='snapshot'}}>Снимок с камеры через облако (полное разрешение, ~1–3 с)</option>
+<option value="hls" {{'selected' if s.image_source=='hls'}}>Кадр из HD-видеопотока (максимальное качество, задержка потока 2–5 с)</option>
+<option value="event" {{'selected' if s.image_source=='event'}}>Фото из события Imou (быстро, но часто низкое качество)</option>
+</select>
+<p class="mut">Если у камеры указан RTSP, он используется в первую очередь. При ошибке источника берётся снимок через облако.</p>
 <div class="grid">
 <div><label>Снимков на событие</label><input name="attempts" value="{{s.attempts}}"></div>
 <div><label>Пауза между снимками, с</label><input name="attempt_interval" value="{{s.attempt_interval}}"></div>
@@ -24,6 +33,7 @@
 {{chk('tg_notify_allowed','Уведомлять о въезде из белого списка')}}
 {{chk('tg_notify_denied','Уведомлять о номерах не из списка')}}
 {{chk('tg_notify_unrecognized','Уведомлять, если номер не распознан')}}
+{{chk('tg_notify_exit','Уведомлять о выезде')}}
 {{chk('tg_send_photo','Прикладывать снимок')}}
 <p><button>Сохранить</button></p></form>
 <form method="post" action="/settings/test-telegram"><button class="sec">Отправить тестовое сообщение</button></form>

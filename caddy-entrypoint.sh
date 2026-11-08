@@ -1,5 +1,9 @@
 #!/bin/sh
 # Определяем адрес сайта: свой DOMAIN или <ip>.sslip.io
+# Если в DOMAIN по ошибке указан IP — используем его как PUBLIC_IP
+if echo "$DOMAIN" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$'; then
+  PUBLIC_IP="$DOMAIN"; DOMAIN=""
+fi
 if [ -z "$PUBLIC_IP" ]; then
   for u in http://api.ipify.org http://ifconfig.me/ip http://icanhazip.com; do
     PUBLIC_IP=$(wget -qO- -T 5 "$u" 2>/dev/null | tr -d '[:space:]')

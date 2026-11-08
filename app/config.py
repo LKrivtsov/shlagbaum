@@ -22,6 +22,9 @@ PUBLIC_IP = os.getenv("PUBLIC_IP", "").strip()
 def resolve_domain() -> str:
     """Без своего домена используем <ip-через-дефисы>.sslip.io — он резолвится в IP сервера."""
     global DOMAIN, PUBLIC_IP
+    import re
+    if re.fullmatch(r"\d+\.\d+\.\d+\.\d+", DOMAIN):  # в DOMAIN указали IP
+        PUBLIC_IP, DOMAIN = DOMAIN, ""
     if DOMAIN:
         return DOMAIN
     if not PUBLIC_IP:
@@ -49,10 +52,12 @@ KEEP_DAYS = int(os.getenv("KEEP_DAYS", "14"))
 DEFAULT_SETTINGS = {
     # Imou
     "imou_callback_flags": "alarm,faceAnalysis,capabilityEvent",
-    # Какие типы событий запускают распознавание (через запятую).
-    # Пусто = любое событие с камеры из списка.
-    "trigger_msg_types": "aiVehDetect,aiVehLine,aiVehArea,detection.vehicle.detected,"
-                         "detection.plate.detected,detection.sentry.detected",
+    # Фильтр событий по полю labelType (через запятую). Пусто = не фильтровать.
+    "trigger_label_types": "carAlarm",
+    # Дополнительный фильтр по msgType (через запятую). Пусто = любой.
+    "trigger_msg_types": "",
+    # Откуда брать кадр: snapshot (снимок через облако), hls (кадр из HD-видеопотока), event (картинка из события)
+    "image_source": "snapshot",
     # Распознавание
     "attempts": "4",              # сколько снимков пробовать
     "attempt_interval": "1.0",    # пауза между снимками, сек
@@ -67,6 +72,7 @@ DEFAULT_SETTINGS = {
     "tg_notify_allowed": "1",
     "tg_notify_denied": "1",
     "tg_notify_unrecognized": "0",
+    "tg_notify_exit": "1",
     "tg_send_photo": "1",
     # SIP
     "sip_server": "",

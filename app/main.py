@@ -189,8 +189,9 @@ def cam_page(request: Request, user=Depends(auth)):
 
 @app.post("/cameras/add")
 def cam_add(device_id: str = Form(...), channel_id: str = Form("0"), name: str = Form(""),
-            rtsp_url: str = Form(""), user=Depends(auth)):
-    db.camera_upsert(device_id.strip(), channel_id.strip() or "0", name.strip(), rtsp_url.strip())
+            rtsp_url: str = Form(""), role: str = Form("entry"), user=Depends(auth)):
+    db.camera_upsert(device_id.strip(), channel_id.strip() or "0", name.strip(), rtsp_url.strip(),
+                     role if role in ("entry", "exit") else "entry")
     return back("/cameras", "Камера сохранена")
 
 
@@ -211,6 +212,21 @@ def cam_del(cid: int, user=Depends(auth)):
     return back("/cameras", "Удалено")
 
 
+@app.post("/cameras/{cid}/role")
+def cam_role(cid: int, role: str = Form(...), user=Depends(auth)):
+    if role in ("entry", "exit"):
+        db.camera_set_role(cid, role)
+    return back("/cameras", "Роль камеры сохранена")
+
+
+@app.get("/event/{eid}", response_class=HTMLResponse)
+def event_page(eid: int, request: Request, user=Depends(auth)):
+    e = db.event_get(eid)
+    if not e:
+        raise HTTPException(404)
+    return render(request, "event.html", e=e)
+
+
 @app.post("/cameras/{cid}/toggle")
 def cam_toggle(cid: int, user=Depends(auth)):
     db.camera_toggle(cid)
@@ -225,7 +241,10 @@ async def cam_test(cid: int, open_gate: str = Form("0"), user=Depends(auth)):
     res = await processor.process_camera(cam, "manual-test", force_open=open_gate == "1")
     if "skipped" in res:
         return back("/cameras", res["skipped"], True)
-    txt = f"Номер: {res['plate'] or '—'} (сырой: {res['raw'] or '—'}), в списке: {'да' if res['allowed'] else 'нет'}, действие: {res['action']} {res['details']}"
+    if cam.get("role") == "exit":
+        txt = f"Выезд: действие {res['action']} {res['details']}"
+    else:
+        txt = f"Номер: {res['plate'] or '—'} (сырой: {res['raw'] or '—'}), в списке: {'да' if res['allowed'] else 'нет'}, действие: {res['action']} {res['details']}"
     return back("/", txt)
 
 
@@ -287,7 +306,7 @@ async def settings_save(request: Request, user=Depends(auth)):
     vals = {k: v for k, v in form.items() if k in config.DEFAULT_SETTINGS}
     # чекбоксы: отсутствуют в форме, если сняты
     for k in ("kz_format_only", "gate_enabled", "tg_notify_allowed", "tg_notify_denied",
-              "tg_notify_unrecognized", "tg_send_photo"):
+              "tg_notify_unrecognized", "tg_send_photo", "tg_notify_exit"):
         if form.get("_section") == _section_of(k):
             vals[k] = "1" if form.get(k) else "0"
     if "sip_password" in vals and vals["sip_password"] == "********":
