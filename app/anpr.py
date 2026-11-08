@@ -46,6 +46,7 @@ class PlateResult:
     box: tuple              # x1, y1, x2, y2
     kz_valid: bool = False
     char_probs: list = field(default_factory=list)
+    square: bool = False    # двухстрочный (квадратный) номер
 
     @property
     def score(self):
@@ -67,8 +68,79 @@ class ANPR:
         so2.intra_op_num_threads = config.ANPR_THREADS
         so2.inter_op_num_threads = 1
         self.ocr = LicensePlateRecognizer(config.OCR_MODEL, device="cpu", providers=prov, sess_options=so2)
+        cfg = self.ocr.config
+        self.alphabet, self.pad, self.slots = cfg.alphabet, cfg.pad_char, cfg.max_plate_slots
+        self._dig = [self.alphabet.index(c) for c in "0123456789"]
+        self._let = [self.alphabet.index(c) for c in "ABCDEFGHIJKLMNOPQRSTUVWXYZ"]
+        self._pad = self.alphabet.index(self.pad)
         self._lock = threading.Lock()  # одна инференс-сессия за раз — экономим CPU и RAM
         log.info("ANPR ready: %s + %s, threads=%s", config.DETECTOR_MODEL, config.OCR_MODEL, config.ANPR_THREADS)
+
+    # ---- OCR с доступом к вероятностям по каждому символу ----
+    def _probs(self, imgs):
+        from fast_plate_ocr.inference.plate_recognizer import _load_image_from_source, preprocess_image
+        x = preprocess_image(_load_image_from_source(imgs, self.ocr.config))
+        out = self.ocr.model.run([self.ocr.plate_output_name], {"input": x})[0]
+        return out.reshape(len(imgs), self.slots, len(self.alphabet))
+
+    def _decode_free(self, P):
+        idx = P.argmax(axis=1)
+        chars = [self.alphabet[i] for i in idx]
+        n = len("".join(chars).rstrip(self.pad))
+        txt = "".join(chars[:n]).replace(self.pad, "")
+        probs = [float(P[i, idx[i]]) for i in range(n)]
+        return txt, probs
+
+    def _decode_tmpl(self, P, templates):
+        """Лучшее прочтение под один из шаблонов (цифра/буква на каждой позиции).
+        Исправляет типичные путаницы 8↔B, 0↔O, 1↔I, 5↔S, 2↔Z."""
+        best = None
+        for t in templates:
+            txt, probs, logp = "", [], 0.0
+            for i in range(self.slots):
+                if i < len(t):
+                    cand = self._dig if t[i] == "D" else self._let
+                    j = max(cand, key=lambda k: P[i, k])
+                    txt += self.alphabet[j]
+                    # уверенность внутри класса (среди цифр или среди букв)
+                    probs.append(float(P[i, j] / (P[i, cand].sum() + 1e-9)))
+                    logp += float(np.log(P[i, j] + 1e-9))
+                else:
+                    logp += float(np.log(P[i, self._pad] + 1e-9))
+            if best is None or logp > best[2]:
+                best = (txt, probs, logp)
+        return best[0], best[1]
+
+    def _read(self, crop, w, h):
+        """Читает номер на вырезанной рамке. Возвращает (номер, уверенность, вероятности, квадратный?)."""
+        if w / max(h, 1) < SQUARE_MAX_ASPECT:
+            # Квадратный номер РК: сверху «KZ/флаг + 3 цифры», снизу «регион + 2–3 буквы».
+            # Режем на две строки и читаем каждую отдельно.
+            H, W = crop.shape[:2]
+            top = crop[: int(H * 0.52), int(W * 0.28):]   # без флага и «KZ»
+            bot = crop[int(H * 0.48):]
+            P = self._probs([top, bot])
+            t_txt, t_p = self._decode_tmpl(P[0], SQUARE_TOP)
+            b_txt, b_p = self._decode_tmpl(P[1], SQUARE_BOTTOM)
+            plate = t_txt + b_txt[2:] + b_txt[:2]   # 172 + BUR + 02
+            probs = t_p + b_p[2:] + b_p[:2]
+            return plate, float(np.mean(probs)), probs, True
+        P = self._probs([crop])[0]
+        free, fp = self._decode_free(P)
+        free = normalize(free)
+        if is_kz(free) or not free:
+            if len(free) < 4:
+                return None
+            return free, float(np.mean(fp)) if fp else 0.0, fp, False
+        # не похоже на формат РК — пробуем прочитать под шаблоны РК
+        kz, kp = self._decode_tmpl(P, KZ_TEMPLATES)
+        kconf = float(np.mean(kp))
+        fconf = float(np.mean(fp)) if fp else 0.0
+        if kconf >= fconf - 0.15:
+            return kz, kconf, kp, False
+        if len(free) < 4:
+            return None
+        return free, fconf, fp, False
 
     def recognize(self, img: np.ndarray, with_stats=False):
         """Список номеров. with_stats=True — ещё и (кол-во найденных рамок номеров, макс. уверенность детектора):
@@ -90,17 +162,21 @@ class ANPR:
                 crop = img[y1:y2, x1:x2]
                 if crop.size == 0 or (x2 - x1) < 20:
                     continue
-                pred = self.ocr.run(crop, return_confidence=True)[0]
-                plate = normalize(pred.plate)
-                if len(plate) < 4:
+                r = self._read(crop, x2 - x1, y2 - y1)
+                if r is None:
                     continue
-                probs = [float(p) for p in pred.char_probs[: len(pred.plate)]] if pred.char_probs is not None else []
-                conf = float(np.mean(probs)) if probs else 0.0
-                results.append(
-                    PlateResult(plate, conf, float(d.confidence), (x1, y1, x2, y2), is_kz(plate), probs)
-                )
+                plate, conf, probs, square = r
+                results.append(PlateResult(plate, conf, float(d.confidence), (x1, y1, x2, y2), is_kz(plate), probs,
+                                           square))
         results.sort(key=lambda r: r.score, reverse=True)
         return (results, n_dets, max_det) if with_stats else results
+
+
+# Шаблоны номеров РК: D — цифра, L — буква
+KZ_TEMPLATES = ["DDDLLDD", "DDDLLLDD", "LDDDLL", "LDDDLLL"]
+SQUARE_TOP = ["DDD"]
+SQUARE_BOTTOM = ["DDLL", "DDLLL"]
+SQUARE_MAX_ASPECT = 1.6   # ширина/высота рамки: однострочный номер РК обычно 2.3–4.5, квадратный ~0.9–1.2
 
 
 def annotate(img: np.ndarray, results: list[PlateResult]) -> np.ndarray:
