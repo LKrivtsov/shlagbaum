@@ -49,6 +49,32 @@ def is_kz(plate: str) -> bool:
 
 
 @dataclass
+class _Box:
+    x1: int
+    y1: int
+    x2: int
+    y2: int
+
+
+@dataclass
+class _Det:
+    bounding_box: _Box
+    confidence: float
+
+
+def _iou(a, b):
+    ix = max(0, min(a.x2, b.x2) - max(a.x1, b.x1))
+    iy = max(0, min(a.y2, b.y2) - max(a.y1, b.y1))
+    inter = ix * iy
+    ua = (a.x2 - a.x1) * (a.y2 - a.y1) + (b.x2 - b.x1) * (b.y2 - b.y1) - inter
+    return inter / ua if ua > 0 else 0.0
+
+
+TILE_SKIP_CONF = 0.6     # номер на целом кадре найден уверенно — фрагменты не нужны
+TILE_MIN_SIDE = 1000     # маленькие кадры не режем
+
+
+@dataclass
 class PlateResult:
     plate: str
     confidence: float       # средняя уверенность OCR по символам
@@ -252,6 +278,34 @@ class ANPR:
         best = max((c for c in cands if c[0] == win), key=lambda c: c[1])
         return (best[0], best[1], best[2], best[3], best[4], rc or rc_fallback)
 
+    def _detect(self, img):
+        """Детекция номеров. Детектор смотрит на кадр в 384 px: на кадре 2304x1296 номер
+        машины в нескольких метрах — это ~15 px, и уверенность падает до порога (0.3).
+        Если на целом кадре номер не найден уверенно — ищем ещё по перекрывающимся
+        фрагментам кадра (каждый детектор видит в 2–3 раза крупнее)."""
+        dets = [_Det(_Box(d.bounding_box.x1, d.bounding_box.y1, d.bounding_box.x2, d.bounding_box.y2),
+                     float(d.confidence)) for d in self.detector.predict(img)]
+        H, W = img.shape[:2]
+        if max((d.confidence for d in dets), default=0.0) >= TILE_SKIP_CONF or max(H, W) < TILE_MIN_SIDE:
+            return dets
+        nx = 3 if W / H > 1.4 else 2
+        ny = 2
+        tw, th = int(W / nx * 1.35), int(H / ny * 1.35)
+        for iy in range(ny):
+            for ix in range(nx):
+                x0 = min(W - tw, max(0, int(ix * (W - tw) / max(1, nx - 1))))
+                y0 = min(H - th, max(0, int(iy * (H - th) / max(1, ny - 1))))
+                for d in self.detector.predict(img[y0:y0 + th, x0:x0 + tw]):
+                    b = d.bounding_box
+                    dets.append(_Det(_Box(b.x1 + x0, b.y1 + y0, b.x2 + x0, b.y2 + y0), float(d.confidence)))
+        # NMS: из пересекающихся рамок оставляем самую уверенную
+        dets.sort(key=lambda d: d.confidence, reverse=True)
+        keep = []
+        for d in dets:
+            if all(_iou(d.bounding_box, k.bounding_box) < 0.3 for k in keep):
+                keep.append(d)
+        return keep
+
     def recognize(self, img: np.ndarray, with_stats=False):
         """Список номеров. with_stats=True — ещё и (кол-во найденных рамок номеров, макс. уверенность детектора):
         по ним видно, есть ли в кадре машина, даже если номер не прочитался."""
@@ -260,17 +314,19 @@ class ANPR:
         h, w = img.shape[:2]
         results = []
         with self._lock:
-            dets = self.detector.predict(img)
+            dets = self._detect(img)
             n_dets = len(dets)
-            max_det = max((float(d.confidence) for d in dets), default=0.0)
+            max_det = max((d.confidence for d in dets), default=0.0)
             for d in dets:
                 r = self._read(img, d.bounding_box)
                 if r is None or len(r[0]) < 4:
                     continue
                 plate, conf, probs, square, box, rc = r
-                results.append(PlateResult(plate, conf, float(d.confidence), box, is_kz(plate), probs, square,
+                results.append(PlateResult(plate, conf, d.confidence, box, is_kz(plate), probs, square,
                                            rc.quad if rc is not None else None,
                                            rc.image if rc is not None else None))
+        # мусор с дальних машин/фона (не формат РК и низкая уверенность) не показываем
+        results = [r for r in results if r.kz_valid or r.confidence >= 0.35]
         results.sort(key=lambda r: r.score, reverse=True)
         return (results, n_dets, max_det) if with_stats else results
 

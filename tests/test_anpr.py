@@ -11,7 +11,7 @@ SAMPLES = Path(__file__).parent / "samples"
 def main():
     eng = anpr.get()
     ok = 0
-    files = sorted(SAMPLES.glob("*.jpg")) + sorted((SAMPLES.parent / "samples_sq").glob("*.jpg")) + sorted((SAMPLES.parent / "samples_hard").glob("*.jpg"))
+    files = sorted(SAMPLES.glob("*.jpg")) + sorted((SAMPLES.parent / "samples_sq").glob("*.jpg")) + sorted((SAMPLES.parent / "samples_hard").glob("*.jpg")) + sorted((SAMPLES.parent / "samples_small").glob("*.jpg"))
     for f in files:
         img = anpr.decode_image(f.read_bytes())
         t = time.time()
