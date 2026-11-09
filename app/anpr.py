@@ -360,7 +360,9 @@ def annotate(img: np.ndarray, results: list[PlateResult]) -> np.ndarray:
             q = np.asarray(r.quad)
             busy.append((int(q[:, 0].min()), int(q[:, 1].min()), int(q[:, 0].max()), int(q[:, 1].max())))
         busy.append(tuple(int(v) for v in r.box))
-    for r in results:
+    # на кадре показываем только самый уверенный номер (остальные — фон, дальние машины)
+    shown = [max(results, key=lambda r: r.score)] if results else []
+    for r in shown:
         color = (89, 199, 52) if r.kz_valid else (0, 149, 255)   # системные зелёный/оранжевый
         if r.quad is not None:
             pts = np.asarray(r.quad).round().astype(np.int32).reshape(-1, 1, 2)
