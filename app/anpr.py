@@ -14,7 +14,7 @@ import numpy as np
 import onnxruntime as ort
 
 from . import config
-from .rectify import rectify as _rectify
+from .rectify import Rectified as _Rect, rectify as _rectify
 
 log = logging.getLogger("anpr")
 
@@ -86,7 +86,7 @@ class ANPR:
         self._let = [self.alphabet.index(c) for c in "ABCDEFGHIJKLMNOPQRSTUVWXYZ"]
         self._pad = self.alphabet.index(self.pad)
         self._lock = threading.Lock()  # одна инференс-сессия за раз — экономим CPU и RAM
-        log.info("ANPR ready: %s + %s, threads=%s", config.DETECTOR_MODEL, config.OCR_MODEL, config.ANPR_THREADS)
+        log.info("ANPR ready (выравнивание номеров v2): %s + %s, threads=%s", config.DETECTOR_MODEL, config.OCR_MODEL, config.ANPR_THREADS)
 
     # ---- OCR с доступом к вероятностям по каждому символу ----
     def _probs(self, imgs):
@@ -157,6 +157,18 @@ class ANPR:
         except Exception:   # выравнивание — улучшение, а не обязательный шаг
             log.exception("rectify failed")
             rc = None
+        if rc is None:
+            # символы не нашлись (мелкий/грязный номер) — показываем хотя бы ровную вырезку рамки
+            x1, y1, x2, y2 = boxes[1]
+            q = np.float32([[x1, y1], [x2, y1], [x2, y2], [x1, y2]])
+            crop = img[y1:y2, x1:x2]
+            oh = 200 if bw / max(bh, 1) < SQUARE_MAX_ASPECT else 110
+            norm = cv2.resize(crop, (max(1, int(crop.shape[1] * oh / max(1, crop.shape[0]))), oh),
+                              interpolation=cv2.INTER_CUBIC)
+            log.info("rectify: символы не найдены, рамка %dx%d — без выравнивания", bw, bh)
+            rc_fallback = _Rect(norm, q, oh == 200, [], 0.0, 0.0)
+        else:
+            rc_fallback = None
         rect_imgs = []
         if rc is not None:
             rect_imgs.append(rc.image)
@@ -238,7 +250,7 @@ class ANPR:
             votes[c[0]] = votes.get(c[0], 0.0) + c[1] * (c[5] if len(c) > 5 else 1.0) * (1.0 if is_kz(c[0]) else 0.6)
         win = max(votes, key=votes.get)
         best = max((c for c in cands if c[0] == win), key=lambda c: c[1])
-        return (best[0], best[1], best[2], best[3], best[4], rc)
+        return (best[0], best[1], best[2], best[3], best[4], rc or rc_fallback)
 
     def recognize(self, img: np.ndarray, with_stats=False):
         """Список номеров. with_stats=True — ещё и (кол-во найденных рамок номеров, макс. уверенность детектора):
