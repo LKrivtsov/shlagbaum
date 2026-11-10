@@ -333,6 +333,16 @@ class SipCall:
                     if data and _parse(data)[0] == 0:
                         self._reply_ok(data)
                 rtp.stop()
+                if rtp.rx:
+                    try:
+                        from . import config
+                        path = config.DATA_DIR / "sip_last.wav"
+                        if rtp.save_wav(path):
+                            self.log.append(f"  звук от провайдера: {len(rtp.rx) * 0.02:.1f} с -> {path}")
+                    except Exception as e:
+                        self.log.append(f"  звук не сохранён: {e}")
+                else:
+                    self.log.append("  звука от провайдера не было")
                 note = ""
                 if not self.remote_bye:
                     bye = self._in_dialog("BYE", remote)
@@ -361,6 +371,7 @@ class _RtpSilence(threading.Thread):
     def __init__(self, sock, sdp: str):
         super().__init__(daemon=True)
         self.sock, self.dest, self.codec, self.pt = sock, None, "", 8
+        self.rx = []          # входящий звук (pt, payload) — чтобы услышать, что говорит провайдер
         self._halt = threading.Event()
         ip = re.search(r"^c=IN IP4 (\S+)", sdp or "", re.M)
         m = re.search(r"^m=audio (\d+) RTP/\S+ ([\d ]+)", sdp or "", re.M)
@@ -380,7 +391,10 @@ class _RtpSilence(threading.Thread):
             try:
                 self.sock.sendto(hdr + payload, self.dest)
                 while True:
-                    self.sock.recvfrom(2048)
+                    pkt, _ = self.sock.recvfrom(2048)
+                    if len(pkt) > 12 and (pkt[1] & 0x7F) in (0, 8) and len(self.rx) < 3000:
+                        cc = pkt[0] & 0x0F
+                        self.rx.append((pkt[1] & 0x7F, pkt[12 + 4 * cc:]))
             except (BlockingIOError, OSError):
                 pass
             seq, ts, nxt = seq + 1, ts + 160, nxt + 0.02
@@ -390,6 +404,36 @@ class _RtpSilence(threading.Thread):
         self._halt.set()
         if self.is_alive():
             self.join(1)
+
+    def save_wav(self, path) -> bool:
+        """Сохраняет входящий звук в WAV (16 бит, 8 кГц)."""
+        if not self.rx:
+            return False
+        import wave
+        pcm = bytearray()
+        for pt, data in self.rx:
+            for b in data:
+                pcm += struct.pack("<h", _ulaw(b) if pt == 0 else _alaw(b))
+        with wave.open(str(path), "wb") as w:
+            w.setnchannels(1)
+            w.setsampwidth(2)
+            w.setframerate(8000)
+            w.writeframes(bytes(pcm))
+        return True
+
+
+def _alaw(a):
+    a ^= 0x55
+    t = (a & 0x0F) << 4
+    seg = (a & 0x70) >> 4
+    t = t + 8 if seg == 0 else ((t + 0x108) << (seg - 1))
+    return t if a & 0x80 else -t
+
+
+def _ulaw(u):
+    u = ~u & 0xFF
+    t = (((u & 0x0F) << 3) + 0x84) << ((u & 0x70) >> 4)
+    return (0x84 - t) if u & 0x80 else (t - 0x84)
 
 
 def call(cfg: SipConfig) -> dict:
