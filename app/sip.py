@@ -14,6 +14,8 @@ import logging
 import random
 import re
 import socket
+import struct
+import threading
 import time
 import uuid
 from dataclasses import dataclass
@@ -86,6 +88,11 @@ class SipCall:
         self.sock.bind(("0.0.0.0", 0))
         self.lport = self.sock.getsockname()[1]
         self.lip = cfg.local_ip or self._detect_ip()
+        # RTP-сокет: провайдеры (Zadarma и др.) сбрасывают вызов через несколько секунд, если нет звука
+        self.rtp = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        self.rtp.bind(("0.0.0.0", 0))
+        self.rtp_port = self.rtp.getsockname()[1]
+        self.last_body = ""
         self.call_id = f"{uuid.uuid4().hex}@{self.lip}"
         self.from_tag = uuid.uuid4().hex[:10]
         self.to_tag = ""
@@ -132,7 +139,7 @@ class SipCall:
             "s=plate-gate\r\n"
             f"c=IN IP4 {self.lip}\r\n"
             "t=0 0\r\n"
-            f"m=audio {self.lport + 2} RTP/AVP 0 8 101\r\n"
+            f"m=audio {self.rtp_port} RTP/AVP 8 0 101\r\n"
             "a=rtpmap:0 PCMU/8000\r\na=rtpmap:8 PCMA/8000\r\n"
             "a=rtpmap:101 telephone-event/8000\r\na=fmtp:101 0-16\r\na=sendrecv\r\n"
         )
@@ -214,7 +221,7 @@ class SipCall:
                     t1 *= 2
                     next_rt = time.time() + t1
                 continue
-            code, reason, headers, _ = _parse(data)
+            code, reason, headers, body = _parse(data)
             if code == 0:
                 # входящий запрос (например BYE от шлагбаума) — отвечаем 200
                 self._reply_ok(data)
@@ -235,6 +242,7 @@ class SipCall:
                 if on_provisional:
                     on_provisional(code)
                 continue
+            self.last_body = body
             return code, reason, headers
         return None
 
@@ -258,6 +266,7 @@ class SipCall:
         try:
             for attempt in range(3):
                 self.cseq += 1
+                t_inv = time.time()
                 self._request("INVITE", self.target_uri, body=self._sdp(), ctype="application/sdp")
                 ringing = {"v": False}
                 res = self._wait_final(
@@ -302,16 +311,28 @@ class SipCall:
                 if self.route_set:
                     self.log.append(f"  route: {', '.join(self.route_set)}")
                 self._ack(remote, same_branch=False, in_dialog=True)
+                rtp = _RtpSilence(self.rtp, self.last_body)
+                if rtp.dest:
+                    rtp.start()
+                    self.log.append(f"{self._ts()} RTP -> {rtp.dest[0]}:{rtp.dest[1]} ({rtp.codec})")
+                # Zadarma и многие провайдеры отвечают 200 OK сразу, ещё до того, как зазвонил
+                # мобильный (гудки идут звуком). Значит, шлагбаум ещё даже не получил вызов —
+                # держим линию до его сброса (BYE), но не дольше ring_timeout.
+                early = not ringing["v"] and time.time() - t_inv < 2.5
+                hold = max(cfg.hold_seconds, cfg.ring_timeout) if early else cfg.hold_seconds
+                if early:
+                    self.log.append(f"  ранний ответ провайдера — ждём до {hold:.0f} с")
                 if cfg.dtmf:
                     for ch in cfg.dtmf:
                         self._in_dialog("INFO", remote, body=f"Signal={ch}\r\nDuration=250\r\n",
                                         ctype="application/dtmf-relay", timeout=2)
                         time.sleep(0.3)
-                end = time.time() + cfg.hold_seconds
+                end = time.time() + hold
                 while time.time() < end and not self.remote_bye:
                     data = self._recv(end - time.time())
                     if data and _parse(data)[0] == 0:
                         self._reply_ok(data)
+                rtp.stop()
                 note = ""
                 if not self.remote_bye:
                     bye = self._in_dialog("BYE", remote)
@@ -325,11 +346,50 @@ class SipCall:
             return self._result(False, "auth failed", t0)
         finally:
             self.sock.close()
+            self.rtp.close()
 
     def _result(self, ok, status, t0):
         r = {"ok": ok, "status": status, "duration": round(time.time() - t0, 1), "trace": self.log}
         log.info("SIP call %s -> %s", self.target_uri, r)
         return r
+
+
+class _RtpSilence(threading.Thread):
+    """Шлёт тишину (G.711, 20 мс) на адрес из SDP ответа и читает входящий звук (симметричный RTP,
+    нужен и для прохождения NAT Docker/VPS)."""
+
+    def __init__(self, sock, sdp: str):
+        super().__init__(daemon=True)
+        self.sock, self.dest, self.codec, self.pt = sock, None, "", 8
+        self._halt = threading.Event()
+        ip = re.search(r"^c=IN IP4 (\S+)", sdp or "", re.M)
+        m = re.search(r"^m=audio (\d+) RTP/\S+ ([\d ]+)", sdp or "", re.M)
+        if ip and m and int(m.group(1)):
+            pts = [int(x) for x in m.group(2).split()]
+            self.pt = next((p for p in pts if p in (0, 8)), 8)
+            self.codec = "PCMU" if self.pt == 0 else "PCMA"
+            self.dest = (ip.group(1), int(m.group(1)))
+
+    def run(self):
+        seq, ts, ssrc = random.randint(0, 65535), random.randint(0, 2**31), random.randint(1, 2**31)
+        payload = (b"\xff" if self.pt == 0 else b"\xd5") * 160
+        self.sock.setblocking(False)
+        nxt = time.time()
+        while not self._halt.is_set():
+            hdr = struct.pack("!BBHII", 0x80, self.pt, seq & 0xFFFF, ts & 0xFFFFFFFF, ssrc)
+            try:
+                self.sock.sendto(hdr + payload, self.dest)
+                while True:
+                    self.sock.recvfrom(2048)
+            except (BlockingIOError, OSError):
+                pass
+            seq, ts, nxt = seq + 1, ts + 160, nxt + 0.02
+            self._halt.wait(max(0, nxt - time.time()))
+
+    def stop(self):
+        self._halt.set()
+        if self.is_alive():
+            self.join(1)
 
 
 def call(cfg: SipConfig) -> dict:
