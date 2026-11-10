@@ -98,6 +98,7 @@ class SipCall:
         self.contact = f"<sip:{cfg.user or 'gate'}@{self.lip}:{self.lport}>"
         self.route_set: list[str] = []   # Route для запросов внутри диалога (из Record-Route ответа 200)
         self.log: list[str] = []
+        self.t_start = time.time()
 
     def _detect_ip(self):
         s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
@@ -158,7 +159,7 @@ class SipCall:
             + f"Content-Length: {len(body.encode())}\r\n\r\n{body}"
         )
         self._send(msg)
-        self.log.append(f"> {method}")
+        self.log.append(f"{self._ts()} > {method}" + (f" {uri}" if method == "INVITE" else ""))
 
     def _ack(self, uri=None, same_branch=True, in_dialog=False):
         self._request("ACK", uri or self.target_uri, cseq=self.cseq, new_branch=not same_branch, in_dialog=in_dialog)
@@ -222,13 +223,23 @@ class SipCall:
             if not cseq.endswith(method):
                 continue
             got_any = True
-            self.log.append(f"< {code} {reason}")
+            extra = ""
+            if method == "INVITE" and code >= 180:
+                # кто ответил: по Server/User-Agent и Contact видно, абонент это или автоответчик провайдера
+                who = (headers.get("server") or headers.get("user-agent") or [""])[0]
+                ct = (headers.get("contact") or [""])[0]
+                sdp = "sdp" if "application/sdp" in " ".join(headers.get("content-type") or []) else "без sdp"
+                extra = f" [{', '.join(x for x in (who, ct, sdp) if x)}]"
+            self.log.append(f"{self._ts()} < {code} {reason}{extra}")
             if code < 200:
                 if on_provisional:
                     on_provisional(code)
                 continue
             return code, reason, headers
         return None
+
+    def _ts(self):
+        return f"{time.time() - self.t_start:.1f}s"
 
     def _reply_ok(self, data: bytes):
         text = data.decode(errors="replace")
