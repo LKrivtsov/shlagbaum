@@ -96,7 +96,7 @@ class SipCall:
         self.target_uri = cfg.target if cfg.target.startswith("sip:") else f"sip:{cfg.target}@{self.domain}"
         self.from_uri = f"sip:{cfg.user or 'gate'}@{self.domain}"
         self.contact = f"<sip:{cfg.user or 'gate'}@{self.lip}:{self.lport}>"
-        self.route_target = self.target_uri
+        self.route_set: list[str] = []   # Route для запросов внутри диалога (из Record-Route ответа 200)
         self.log: list[str] = []
 
     def _detect_ip(self):
@@ -136,7 +136,8 @@ class SipCall:
             "a=rtpmap:101 telephone-event/8000\r\na=fmtp:101 0-16\r\na=sendrecv\r\n"
         )
 
-    def _request(self, method, uri, cseq=None, body="", ctype="", extra="", new_branch=True):
+    def _request(self, method, uri, cseq=None, body="", ctype="", extra="", new_branch=True,
+                 in_dialog=False, auth=None):
         if new_branch:
             self.branch = "z9hG4bK" + uuid.uuid4().hex[:16]
         to = f"<{self.target_uri}>" + (f";tag={self.to_tag}" if self.to_tag else "")
@@ -150,7 +151,8 @@ class SipCall:
             f"CSeq: {cseq or self.cseq} {method}\r\n"
             f"Contact: {self.contact}\r\n"
             "User-Agent: plate-gate/1.0\r\n"
-            + (self.auth_header if method in ("INVITE", "BYE", "INFO") and self.auth_header else "")
+            + "".join(f"Route: {r}\r\n" for r in (self.route_set if in_dialog else []))
+            + (auth if auth is not None else (self.auth_header if method == "INVITE" else ""))
             + extra
             + (f"Content-Type: {ctype}\r\n" if ctype else "")
             + f"Content-Length: {len(body.encode())}\r\n\r\n{body}"
@@ -158,8 +160,23 @@ class SipCall:
         self._send(msg)
         self.log.append(f"> {method}")
 
-    def _ack(self, uri=None, same_branch=True):
-        self._request("ACK", uri or self.target_uri, cseq=self.cseq, new_branch=not same_branch)
+    def _ack(self, uri=None, same_branch=True, in_dialog=False):
+        self._request("ACK", uri or self.target_uri, cseq=self.cseq, new_branch=not same_branch, in_dialog=in_dialog)
+
+    def _in_dialog(self, method, uri, body="", ctype="", timeout=3):
+        """Запрос внутри диалога (BYE/INFO): с Route из Record-Route и своей Digest-авторизацией,
+        если прокси её запросит (подпись INVITE для другого метода не подходит)."""
+        auth = ""
+        res = None
+        for _ in range(2):
+            self.cseq += 1
+            self._request(method, uri, body=body, ctype=ctype, in_dialog=True, auth=auth)
+            res = self._wait_final(method, time.time() + timeout)
+            if res and res[0] in (401, 407):
+                auth = self._make_auth(res[2], method, uri)
+                continue
+            break
+        return res
 
     def _make_auth(self, headers, method, uri):
         is_proxy = "proxy-authenticate" in headers
@@ -264,25 +281,36 @@ class SipCall:
                 self.to_tag = m.group(1) if m else ""
                 contact = (headers.get("contact") or [""])[0]
                 mc = re.search(r"<([^>]+)>", contact)
-                remote = mc.group(1) if mc else self.target_uri
-                self._ack(remote, same_branch=False)
+                remote = mc.group(1) if mc else (contact.split(";")[0].strip() or self.target_uri)
+                # Record-Route -> Route (для вызывающей стороны в обратном порядке), иначе прокси
+                # не узнаёт диалог и отвечает на BYE «404 Not here»
+                rr = []
+                for v in headers.get("record-route") or []:
+                    rr += [x.strip() for x in re.findall(r"<[^>]+>[^,]*", v)] or [v.strip()]
+                self.route_set = list(reversed(rr))
+                if self.route_set:
+                    self.log.append(f"  route: {', '.join(self.route_set)}")
+                self._ack(remote, same_branch=False, in_dialog=True)
                 if cfg.dtmf:
                     for ch in cfg.dtmf:
-                        self.cseq += 1
-                        self._request("INFO", remote, body=f"Signal={ch}\r\nDuration=250\r\n",
-                                      ctype="application/dtmf-relay")
-                        self._wait_final("INFO", time.time() + 2)
+                        self._in_dialog("INFO", remote, body=f"Signal={ch}\r\nDuration=250\r\n",
+                                        ctype="application/dtmf-relay", timeout=2)
                         time.sleep(0.3)
                 end = time.time() + cfg.hold_seconds
                 while time.time() < end and not self.remote_bye:
                     data = self._recv(end - time.time())
                     if data and _parse(data)[0] == 0:
                         self._reply_ok(data)
+                note = ""
                 if not self.remote_bye:
-                    self.cseq += 1
-                    self._request("BYE", remote)
-                    self._wait_final("BYE", time.time() + 3)
-                return self._result(True, f"answered {code}", t0)
+                    bye = self._in_dialog("BYE", remote)
+                    if bye and bye[0] in (404, 481) and not self.route_set and remote != self.target_uri:
+                        # прокси без Record-Route не знает Contact абонента — пробуем через исходный адрес
+                        bye = self._in_dialog("BYE", self.target_uri)
+                    if bye is None or bye[0] >= 300:
+                        # шлагбаум уже ответил — открытие состоялось, но трубку корректно положить не удалось
+                        note = f", BYE: {bye[0]} {bye[1]}" if bye else ", BYE: нет ответа"
+                return self._result(True, f"answered {code}{note}", t0)
             return self._result(False, "auth failed", t0)
         finally:
             self.sock.close()
